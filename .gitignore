@@ -1,0 +1,19 @@
+# پوشه‌ها و فایل‌های تولیدشده (نباید در مخزن باشند)
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+.screenshots/
+screenshots/
+
+# داده‌های کاربر (هرگز آپلود نشوند)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+backups/
+
+# محیط مجازی
+.venv/
+venv/

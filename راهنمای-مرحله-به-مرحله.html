@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>راهنمای مرحله‌به‌مرحلهٔ ساخت برنامه حسابداری کسب‌وکار کوچک</title>
+<style>
+  :root{--bg:#f5f6f8;--card:#fff;--ink:#1b2430;--muted:#5c6b7a;--line:#e2e6ec;
+        --brand:#1f5f8b;--brand2:#2c7fb8;--ok:#17795e;--warn:#b5651d;--bad:#b3261e;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Vazirmatn","IRANSans","Tahoma","Segoe UI",Arial,sans-serif;
+       font-size:15px;line-height:1.95}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 18px 70px}
+  header.hero{background:linear-gradient(135deg,#123c5a,#1f5f8b 55%,#2c7fb8);color:#fff;
+              padding:40px 18px 34px;margin-bottom:26px}
+  header.hero .inner{max-width:1060px;margin:0 auto}
+  header.hero h1{margin:0 0 8px;font-size:27px;line-height:1.55}
+  header.hero p{margin:0;opacity:.92;font-size:15px}
+  .meta{margin-top:14px;font-size:13px;opacity:.85}
+  h2{font-size:20px;margin:42px 0 12px;padding-bottom:8px;border-bottom:2px solid var(--brand2);color:var(--brand)}
+  h3{font-size:17px;margin:24px 0 8px;color:#16394f}
+  h4{font-size:15px;margin:18px 0 6px;color:#22475f}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px;background:#fff}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:right;vertical-align:top}
+  th{background:#eef3f7;color:#16394f}
+  tbody tr:nth-child(even){background:#fafbfc}
+  code{direction:ltr;display:inline-block;background:#eef1f5;padding:1px 6px;border-radius:5px;
+       font-family:Consolas,"Courier New",monospace;font-size:13px;text-align:left}
+  pre{direction:ltr;text-align:left;background:#10233a;color:#dbe7f3;padding:14px 16px;border-radius:10px;
+      overflow-x:auto;font-family:Consolas,"Courier New",monospace;font-size:12.5px;line-height:1.65}
+  pre .c{color:#7fa8c9}
+  pre .k{color:#8fd6a0}
+  .note{border-inline-start:5px solid var(--brand2);background:#eef6fc;padding:11px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .warn{border-inline-start:5px solid var(--accent,#f0a500);background:#fff8e9;padding:11px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .ok{border-inline-start:5px solid var(--ok);background:#ecf7f2;padding:11px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .danger{border-inline-start:5px solid var(--bad);background:#fdeceb;padding:11px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+  .step{display:inline-block;background:var(--brand);color:#fff;border-radius:50%;
+        width:30px;height:30px;line-height:30px;text-align:center;font-weight:bold;margin-inline-end:8px}
+  ul,ol{padding-inline-start:22px;margin:8px 0}
+  .tree{direction:ltr;text-align:left;background:#0f2136;color:#cfe0f0;padding:16px 18px;
+        border-radius:10px;font-family:Consolas,monospace;font-size:13px;line-height:1.8}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  .badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700}
+  .b-new{background:#e3f3ec;color:var(--ok);border:1px solid #b8e0cf}
+  .b-key{background:#fdeaea;color:var(--bad);border:1px solid #f3c4c0}
+</style>
+</head>
+<body>
+<header class="hero"><div class="inner">
+  <h1>ساخت گام‌به‌گامِ برنامه حسابداری کسب‌وکار کوچک</h1>
+  <p>مشتریان • انبار • صدور فاکتور • دریافت و پرداخت • گزارشات — با Python و PySide6 و SQLite</p>
+  <div class="meta">همراه با کدِ کامل و تست‌شده • ۹۶ تست (منطق، ویژگی‌ها، رابط کاربری) • شهریور ۱۴۰۵</div>
+</div></header>
+
+<div class="wrap">
+
+<div class="ok">
+<strong>این پروژه کامل است و اکنون اجرا می‌شود.</strong> تمام کدها در پوشهٔ <code>hesabdar</code> نوشته شده و با موفقیت تست شده‌اند.
+برای اجرا کافی است: <code>pip install -r requirements.txt</code> سپس <code>python main.py</code>.
+</div>
+
+<h2>نمای کلی معماری</h2>
+<table>
+<thead><tr><th style="width:14%">لایه</th><th style="width:22%">فایل</th><th>مسئولیت</th></tr></thead>
+<tbody>
+<tr><td>تقویم</td><td><code>Jalali/jalali.py</code></td><td>تبدیل میلادی ↔ شمسی، بدون هیچ وابستگی خارجی</td></tr>
+<tr><td>پایگاه داده</td><td><code>schema.sql</code></td><td>جداول، تریگرهای قوانین حسابداری، نماهای گزارش‌گیری، کدینگ پیش‌فرض</td></tr>
+<tr><td>دسترسی به داده</td><td><code>db.py</code></td><td>اتصال، تراکنش اتمی، شماره‌گذاری، پشتیبان‌گیری</td></tr>
+<tr><td>منطق کسب‌وکار</td><td><code>repo.py</code></td><td>فاکتور، انبار، دریافت/پرداخت، چک‌ها، سند حسابداری خودکار، گزارشات</td></tr>
+<tr><td>کاربران و دسترسی</td><td><code>auth.py</code></td><td>هشِ رمز عبور (PBKDF2)، نقش‌ها، کنترل مجوزها</td></tr>
+<tr><td>رابط کاربری</td><td><code>ui/*.py</code></td><td>۷ برگه: داشبورد، اشخاص، کالاها، فاکتورها، دریافت/پرداخت، گزارشات، تنظیمات</td></tr>
+<tr><td>تست</td><td><code>tests/</code></td><td>سناریوی کامل خرید→فروش→دریافت→برگشت→ابطال + تست رابط کاربری</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<strong>اصل طراحی:</strong> رابط کاربری هیچ قانون حسابداری‌ای را خودش اجرا نمی‌کند؛ فقط <code>repo</code> را صدا می‌زند
+و قوانینِ حیاتی (تراز سند، تغییرناپذیریِ سند قطعی) در <strong>پایگاه داده</strong> نیز تکرار شده‌اند تا هیچ باگی نتواند آن‌ها را دور بزند.
+</div>
+
+<h2><span class="step">۰</span> آماده‌سازی</h2>
+<pre>pip install -r requirements.txt     <span class="c"># فقط PySide6</span>
+python seed_demo.py                 <span class="c"># اختیاری: دادهٔ نمونه</span>
+python main.py                      <span class="c"># اجرا</span></pre>
+
+<h3>ساختار پوشه‌ها</h3>
+<div class="tree">hesabdar/
+├── main.py               نقطهٔ ورود
+├── schema.sql            شمای پایگاه داده
+├── db.py                 لایه دسترسی به داده
+├── repo.py               منطق کسب‌وکار  ← مهم‌ترین فایل
+├── jalali.py             تقویم شمسی
+├── utils.py              نرمال‌سازی اعداد/متن فارسی
+├── seed_demo.py          دادهٔ نمونه
+├── build_windows.bat     ساخت فایل اجرایی
+├── ui/
+│   ├── main_window.py    پنجرهٔ اصلی + داشبورد
+│   ├── customers.py      مشتریان و تامین‌کنندگان
+│   ├── products.py       کالاها و انبار
+│   ├── invoices.py       صدور فاکتور
+│   ├── payments.py       دریافت و پرداخت
+│   ├── reports.py        گزارشات
+│   ├── settings.py       تنظیمات و پشتیبان‌گیری
+│   └── widgets.py        ابزارک‌های مشترک (تاریخ، مبلغ، جدول، چاپ)
+└── tests/
+    ├── test_logic.py     ۳۶ تست سناریوی کامل
+    └── test_ui.py        تست رابط کاربری</div>
+
+<h2><span class="step">۱</span> تقویم شمسی <span class="badge b-new">بدون وابستگی</span></h2>
+
+<p>نخستین تصمیم درست: <strong>تاریخ در پایگاه داده همیشه میلادیِ استاندارد (<code>YYYY-MM-DD</code>) ذخیره می‌شود</strong> و فقط هنگام نمایش به شمسی تبدیل می‌گردد.
+ذخیرهٔ تاریخ شمسی به عنوان کلید، مرتب‌سازی و بازه‌گیری را خراب می‌کند.</p>
+
+<pre><span class="c"># jalali.py — هستهٔ تبدیل (الگوریتم استاندارد دورهٔ ۳۳‌ساله)</span>
+def gregorian_to_jalali(gy, gm, gd):
+    return _d2j(_g2d(gy, gm, gd))
+
+def jalali_to_gregorian(jy, jm, jd):
+    return _d2g(_j2d(jy, jm, jd))
+
+def to_jalali_str(g, sep="/"):        <span class="c"># '2026-05-01' → '1405/02/11'</span>
+    y, m, d = str(g).split("-")[:3]
+    jy, jm, jd = gregorian_to_jalali(int(y), int(m), int(d))
+    return f"{jy:04d}{sep}{jm:02d}{sep}{jd:02d}"
+
+def from_jalali_str(j):               <span class="c"># '1405/02/11' → '2026-05-01'</span>
+    ...  <span class="c"># شامل کنترل اعتبار (مثلاً رد کردن ۳۰ اسفند در سال غیرکبیسه)</span></pre>
+
+<div class="ok">
+<strong>صحت‌سنجی انجام‌شده:</strong> رفت‌وبرگشتِ تاریخ‌ها برای ۹۱٬۶۷۶ روز متوالی و <strong>تمام روزهای سال‌های ۱۳۰۰ تا ۱۵۰۰</strong> با صفر خطا؛
+همچنین تطبیقِ نوروزِ سال‌های ۱۳۹۵ تا ۱۴۱۰ با تاریخ‌های شناخته‌شده (مثلاً ۱ فروردین ۱۴۰۵ = ۲۰۲۶-۰۳-۲۱).
+</div>
+
+<h2><span class="step">۲</span> پایگاه داده و قوانین حسابداری <span class="badge b-key">حیاتی</span></h2>
+
+<h3>جدول‌های اصلی</h3>
+<table>
+<thead><tr><th style="width:24%">جدول</th><th>نقش</th></tr></thead>
+<tbody>
+<tr><td><code>parties</code></td><td>مشتریان و تامین‌کنندگان (یک جدول با فیلد <code>kind</code>) + ماندهٔ اولیه</td></tr>
+<tr><td><code>items</code></td><td>کالا و خدمات؛ <code>track_stock</code> مشخص می‌کند انبار می‌شود یا نه</td></tr>
+<tr><td><code>stock_moves</code></td><td><strong>گردش انبار</strong> — موجودی از مجموع این حرکت‌ها حساب می‌شود، نه یک ستون جداگانه</td></tr>
+<tr><td><code>invoices</code> / <code>invoice_lines</code></td><td>فاکتور فروش / خرید / برگشت‌ها</td></tr>
+<tr><td><code>payments</code></td><td>دریافت و پرداخت (نقد، بانک، کارتخوان)</td></tr>
+<tr><td><code>journal_entries</code> / <code>journal_lines</code></td><td><strong>هستهٔ سیستم</strong> — اسناد حسابداری دوطرفه</td></tr>
+<tr><td><code>accounts</code></td><td>درخت حساب‌ها (کدینگ) — ۲۵ حساب پیش‌فرض</td></tr>
+<tr><td><code>sequences</code> / <code>audit_log</code></td><td>شماره‌گذاری خودکار و ردیابی تغییرات</td></tr>
+</tbody>
+</table>
+
+<h3>تریگرها: قوانینی که هیچ‌کس نمی‌تواند دور بزند</h3>
+<pre><span class="c">-- ۱) سند قطعی‌شده قابل ویرایش نیست</span>
+CREATE TRIGGER trg_lines_no_edit_posted
+BEFORE UPDATE ON journal_lines
+WHEN EXISTS (SELECT 1 FROM journal_entries e
+             WHERE e.id = OLD.entry_id AND e.status = 'posted')
+BEGIN
+    SELECT RAISE(ABORT, 'سند قطعی‌شده قابل ویرایش نیست؛ از سند اصلاحی استفاده کنید');
+END;
+
+<span class="c">-- ۲) سند فقط در صورت تراز بودن قطعی می‌شود</span>
+CREATE TRIGGER trg_entry_must_balance
+BEFORE UPDATE OF status ON journal_entries
+WHEN NEW.status = 'posted' AND OLD.status &lt;&gt; 'posted'
+BEGIN
+    SELECT RAISE(ABORT, 'سند تراز نیست: جمع بدهکار و بستانکار برابر نیست')
+    WHERE (SELECT COALESCE(SUM(debit),0)  FROM journal_lines WHERE entry_id = NEW.id)
+       &lt;&gt; (SELECT COALESCE(SUM(credit),0) FROM journal_lines WHERE entry_id = NEW.id)
+       OR (SELECT COUNT(*) FROM journal_lines WHERE entry_id = NEW.id) &lt; 2;
+END;</pre>
+
+<table>
+<thead><tr><th style="width:30%">محدودیت</th><th>چرا</th></tr></thead>
+<tbody>
+<tr><td><code>debit INTEGER CHECK (&gt;= 0)</code></td><td>مبالغ فقط عدد صحیح — استفاده از float در پول ممنوع</td></tr>
+<tr><td><code>CHECK (debit = 0 OR credit = 0)</code></td><td>یک سطر نمی‌تواند همزمان بدهکار و بستانکار باشد</td></tr>
+<tr><td><code>CHECK (debit &gt; 0 OR credit &gt; 0)</code></td><td>سطر بی‌اثر مجاز نیست</td></tr>
+<tr><td>نمای <code>v_trial_balance</code></td><td>فقط اسناد قطعی (<code>posted</code>) را در گزارش‌ها لحاظ می‌کند</td></tr>
+</tbody>
+</table>
+
+<h3>کدینگ پیش‌فرض (۲۵ حساب)</h3>
+<p>دارایی‌ها (صندوق، بانک، مشتریان، موجودی کالا، اعتبار مالیاتی خرید) • بدهی‌ها (تامین‌کنندگان، مالیات بر ارزش افزوده) •
+حقوق صاحبان سهام • درآمدها (فروش، خدمات، برگشت و تخفیفات) • هزینه‌ها (بهای تمام‌شده، اداری، حقوق، حمل).</p>
+
+<h2><span class="step">۳</span> لایه دسترسی به داده</h2>
+
+<pre><span class="c"># db.py — فایل داده در پوشهٔ کاربر (در Program Files اجازهٔ نوشتن ندارید)</span>
+def data_dir():
+    base = os.environ.get("APPDATA") or os.path.expanduser("~")   <span class="c"># ویندوز</span>
+    path = os.path.join(base, "SmallBizAccounting"); os.makedirs(path, exist_ok=True)
+    return path
+
+<span class="c"># تراکنش اتمیِ تودرتو (SQLite تراکنش تو‌در‌تو ندارد ← از SAVEPOINT استفاده شد)</span>
+@contextmanager
+def tx(con):
+    con.execute(f"SAVEPOINT sp_{n}")
+    try:
+        yield con
+        con.execute("RELEASE sp_x")
+    except Exception:
+        con.execute("ROLLBACK TO sp_x"); con.execute("RELEASE sp_x"); raise</pre>
+
+<div class="warn">
+<strong>نکتهٔ مهم:</strong> هر عملیات مالی (فاکتور، دریافت، پرداخت) چندین جدول را همزمان تغییر می‌دهد
+(سند + سطرهای سند + حرکت انبار + به‌روزرسانی فاکتور). بدون تراکنش اتمی، یک خطای میانی
+دفاتر را نیمه‌ثبت و نامتوازن می‌کند. همهٔ این عملیات در <code>with db.tx(con):</code> انجام می‌شوند.
+</div>
+
+<h2><span class="step">۴</span> منطق کسب‌وکار — قلب برنامه</h2>
+
+<h3>۴.۱ ثبت سند حسابداری</h3>
+<pre>def post_entry(con, gdate, entry_type, lines, reference_no="", description=""):
+    """
+    lines = [(کد حساب, بدهکار, بستانکار, party_id), ...]
+    اگر تراز نباشد ← پایگاه داده خطا می‌دهد و هیچ چیز ذخیره نمی‌شود
+    """
+    with db.tx(con):
+        ...  <span class="c"># درج سربرگ سند + سطرها</span>
+        cur.execute("UPDATE journal_entries SET status='posted' WHERE id=?", (entry_id,))
+    return entry_id</pre>
+
+<h3>۴.۲ فاکتور فروش → سند خودکار</h3>
+<p>وقتی فاکتوری قطعی می‌شود، برنامه به‌طور خودکار این سند را می‌سازد (کاربر چیزی را دستی وارد نمی‌کند):</p>
+<table>
+<thead><tr><th>حساب</th><th>بدهکار</th><th>بستانکار</th></tr></thead>
+<tbody>
+<tr><td>۱۰۱۰۳ مشتریان</td><td>مبلغ کل فاکتور</td><td>—</td></tr>
+<tr><td>۴۰۱ فروش کالا</td><td>—</td><td>جمع خالص</td></tr>
+<tr><td>۴۰۳ برگشت از فروش و تخفیفات</td><td>تخفیف (در صورت وجود)</td><td>—</td></tr>
+<tr><td>۲۰۱۰۳ ارزش افزوده پرداختنی</td><td>—</td><td>مالیات</td></tr>
+<tr><td>۵۰۱ بهای تمام‌شده</td><td>بهای کالای فروخته‌شده</td><td>—</td></tr>
+<tr><td>۱۰۱۰۵ موجودی کالا</td><td>—</td><td>بهای کالای فروخته‌شده</td></tr>
+</tbody>
+</table>
+<p>فاکتور خرید (ورود به انبار) نیز به همین شکل است: بدهکار «موجودی کالا» و «اعتبار مالیاتی خرید»، بستانکار «تامین‌کنندگان».</p>
+
+<h3>۴.۳ قیمت‌گذاری موجودی: میانگین موزون</h3>
+<pre>def stock_state(con, item_id, upto_date=None):
+    """بازسازی موجودی و بهای تمام‌شده با پخشِ تمام حرکت‌ها"""
+    qty, avg = 0.0, 0.0
+    for m in con.execute("... ORDER BY move_date, id"):
+        q = float(m["qty"])
+        if q &gt; 0:                                    <span class="c"># ورود به انبار</span>
+            total = qty * avg + q * float(m["unit_cost"])
+            qty  += q
+            avg   = total / qty if qty else 0.0
+        else:                                        <span class="c"># خروج از انبار</span>
+            qty -= -q
+    return round(qty, 4), int(round(avg))</pre>
+<p>مثالِ تست‌شده: خرید ۱۰ عدد × ۱،۰۰۰،۰۰۰ + خرید ۱۰ عدد × ۱،۲۰۰،۰۰۰ ⇒ بهای هر واحد = <strong>۱،۱۰۰،۰۰۰ ریال</strong>.</p>
+
+<h3>۴.۴ اصلاح اشتباه: ابطال با سند معکوس</h3>
+<pre>def cancel_invoice(con, inv_id, reason=""):
+    <span class="c"># سندِ فاکتور را دقیقاً برعکس می‌کنیم (بدهکار↔بستانکار) و حرکت انبار را معکوس می‌کنیم.</span>
+    <span class="c"># فاکتور «حذف» نمی‌شود — ردی از آن برای همیشه در دفاتر می‌ماند.</span></pre>
+
+<h3>۴.۵ گزارشات</h3>
+<ul>
+  <li><strong>فروش و سود ناخالص:</strong> خالص فروش − بهای تمام‌شده، به تفکیک فاکتور و با درصد سود</li>
+  <li><strong>موجودی و ارزش انبار:</strong> موجودی، میانگین بهای تمام‌شده، ارزش ریالی + هشدار زیرِ حد نصاب</li>
+  <li><strong>بدهی مشتریان / تامین‌کنندگان:</strong> مانده، تعداد و مبلغ فاکتورهای باز</li>
+  <li><strong>صورت سود و زیان و تراز آزمایشی:</strong> برای اطمینان از صحت دفاتر</li>
+  <li><strong>دفتر حساب:</strong> گردش هر حساب با ماندهٔ گردنده</li>
+</ul>
+
+<h2><span class="step">۵</span> تست‌ها <span class="badge b-new">۳۶ تستِ موفق</span></h2>
+<pre>python tests/test_logic.py</pre>
+<p>سناریوی کاملِ یک کسب‌وکار در یک فایل تست اجرا می‌شود و خروجی آن:</p>
+<pre>✅ ایجاد مشتری و تامین‌کننده
+✅ موجودی پس از خرید = ۱۰
+✅ میانگین موزون = ۱،۱۰۰،۰۰۰ ریال
+✅ خالص فاکتور فروش = ۹،۴۰۰،۰۰۰      (با احتساب تخفیف)
+✅ مالیات فروش = ۹۵۰،۰۰۰
+✅ بهای تمام‌شدهٔ فروش = ۵،۵۰۰،۰۰۰
+✅ سود ناخالص = ۳،۹۰۰،۰۰۰
+✅ ماندهٔ مشتری پس از دریافت = ۵،۳۵۰،۰۰۰
+✅ موجودی پس از برگشت = ۱۷
+✅ رد کردن سند نامتوازن              (توسط پایگاه داده)
+✅ رد ویرایش فاکتور قطعی‌شده
+✅ رد حذف مشتریِ دارای سند
+✅ تراز آزمایشی پس از ابطال           بدهکار ۷۱،۶۰۰،۰۰۰ = بستانکار ۷۱،۶۰۰،۰۰۰
+-------------------------------------------
+نتیجه: 36 موفق / 0 ناموفق</pre>
+
+<h2><span class="step">۶</span> رابط کاربری</h2>
+
+<h3>برگه‌های برنامه</h3>
+<table>
+<thead><tr><th style="width:24%">برگه</th><th>کاری که انجام می‌دهد</th></tr></thead>
+<tbody>
+<tr><td>🏠 داشبورد</td><td>فروش سال، سود ناخالص، ارزش انبار، طلب‌ها، بدهی‌ها، موجودی نقد، و هشدار در صورت نامتوازن بودن دفاتر</td></tr>
+<tr><td>👥 مشتریان و تامین‌کنندگان</td><td>ثبت، ویرایش، جستجو، سقف اعتبار، ماندهٔ لحظه‌ای و <strong>دفتر حسابِ</strong> هر شخص</td></tr>
+<tr><td>📦 کالاها و انبار</td><td>تعریف کالا/خدمت، موجودی، میانگین بهای تمام‌شده، <strong>اصلاح موجودی (انبارگردانی)</strong> و کاردکس کالا</td></tr>
+<tr><td>🧾 فاکتورها</td><td>صدور فاکتور فروش/خرید/برگشت، پیش‌نویس، قطعی کردن، ابطال، <strong>چاپ PDF</strong></td></tr>
+<tr><td>💵 دریافت و پرداخت</td><td>ثبت رسید با روش نقد/بانک/کارتخوان، اتصال به فاکتور برای تسویه، ابطال، چاپ رسید</td></tr>
+<tr><td>📊 گزارشات</td><td>۶ گزارش + دفتر حساب، با بازهٔ تاریخ شمسی، خروجی Excel و PDF</td></tr>
+<tr><td>⚙️ تنظیمات</td><td>مشخصات شرکت، نرخ مالیات، واحد پول (ریال/تومان)، پشتیبان‌گیری و بازیابی، مشاهدهٔ کدینگ</td></tr>
+</tbody>
+</table>
+
+<h3>نکات فنیِ رابط کاربری</h3>
+<ul>
+  <li><strong>راست‌چین کردن کل برنامه:</strong> <code>app.setLayoutDirection(Qt.RightToLeft)</code> در <code>main.py</code>.</li>
+  <li><strong>فیلد تاریخ شمسی (<code>DateEdit</code>):</strong> ورودی متنی با اعتبارسنجی (مثلاً ۳۰ اسفندِ سال غیرکبیسه را رد می‌کند) + دکمهٔ «امروز»؛ مقدارِ ذخیره‌شده همیشه میلادی است.</li>
+  <li><strong>فیلد مبلغ (<code>MoneyEdit</code>):</strong> جداکنندهٔ هزارگان خودکار؛ ارقام فارسی/عربی را هم می‌پذیرد.</li>
+  <li><strong>دیالوگ فاکتور:</strong> ردیف‌ها در یک لیستِ پایتونی نگهداری می‌شوند و جدول فقط نمایش آن است —
+      این کار باگِ رایجِ «جابه‌جا شدن شماره ردیف پس از حذف یک سطر» را کاملاً از بین می‌برد (این مورد در تست بررسی شده است).</li>
+  <li><strong>چاپ:</strong> خروجی PDF از طریق <code>QTextDocument</code> با قالب HTML راست‌چین (فاکتور، رسید، گزارشات).</li>
+</ul>
+
+<h2><span class="step">۷</span> اجرا روی ویندوز و ساخت فایل اجرایی</h2>
+<pre><span class="c">:: نصب و اجرا</span>
+pip install -r requirements.txt
+python main.py
+
+<span class="c">:: ساخت EXE (بدون نیاز به نصب پایتون روی سیستم مقصد)</span>
+build_windows.bat</pre>
+<p>دستورِ پیشنهادی (و مطمئن‌تر) از مرحلهٔ ۱۰:</p>
+<pre>python build_exe.py</pre>
+<div class="note">
+<strong>دو نکتهٔ ویندوزی که در کد رعایت شده:</strong>
+(۱) فایل پایگاه داده در <code>%APPDATA%\SmallBizAccounting</code> ذخیره می‌شود، نه کنار برنامه؛
+(۲) مسیرِ فایل <code>schema.sql</code> در حالتِ اجرایِ فریزشده (PyInstaller) از طریق <code>sys._MEIPASS</code> پیدا می‌شود.
+</div>
+
+
+<h2><span class="step">۹</span> ویژگی‌های تکمیلی <span class="badge b-new">اضافه‌شده</span></h2>
+
+<h3>۹.۱ کاربران و سطح دسترسی (<code>auth.py</code>)</h3>
+<pre><span class="c"># رمز عبور هرگز متن ساده نیست: PBKDF2-HMAC-SHA256 با نمک تصادفی</span>
+def make_hash(password):
+    salt = os.urandom(16)
+    return pbkdf2_hmac("sha256", password.encode(), salt, 120_000).hex(), salt.hex()
+
+<span class="c"># کنترل دسترسی در دو سطح: رابط کاربری (غیرفعال کردن دکمه) و منطق برنامه</span>
+auth.require("invoice.cancel")     <span class="c"># در صورت نداشتن مجوز خطا می‌دهد</span></pre>
+<table>
+<thead><tr><th style="width:18%">نقش</th><th>دسترسی‌ها</th></tr></thead>
+<tbody>
+<tr><td>مدیر سیستم</td><td>همه‌چیز — از جمله مدیریت کاربران، قفل دوره و بازیابی پشتیبان</td></tr>
+<tr><td>حسابدار</td><td>ثبت، قطعی کردن و ابطال فاکتور • دریافت و پرداخت • چک‌ها • کالا و اشخاص • گزارشات</td></tr>
+<tr><td>اپراتور</td><td>فقط ثبتِ فاکتور و دریافت/پرداخت (بدون قطعی کردن و بدون ابطال)</td></tr>
+<tr><td>مشاهده‌گر</td><td>فقط مشاهدهٔ گزارشات</td></tr>
+</tbody>
+</table>
+<p>در اولین اجرا یک مدیر سیستم ساخته می‌شود و از آن پس ورود با رمز عبور الزامی است.</p>
+
+<h3>۹.۲ مدیریت چک‌ها (<code>ui/cheques.py</code>)</h3>
+<table>
+<thead><tr><th style="width:26%">رویداد</th><th>سند حسابداریِ تولیدشده</th></tr></thead>
+<tbody>
+<tr><td>ثبت چک دریافتنی</td><td>بدهکار «اسناد دریافتنی» / بستانکار «مشتریان»</td></tr>
+<tr><td>وصول چک دریافتنی</td><td>بدهکار «بانک» / بستانکار «اسناد دریافتنی»</td></tr>
+<tr><td>برگشت خوردن چک دریافتنی</td><td>بدهکار «مشتریان» / بستانکار «اسناد دریافتنی»</td></tr>
+<tr><td>ثبت چک پرداختنی</td><td>بدهکار «تامین‌کنندگان» / بستانکار «اسناد پرداختنی»</td></tr>
+<tr><td>پرداخت چک پرداختنی</td><td>بدهکار «اسناد پرداختنی» / بستانکار «بانک»</td></tr>
+<tr><td>ابطال چک</td><td>سندِ معکوسِ ثبتِ اولیه</td></tr>
+</tbody>
+</table>
+<p>برگهٔ چک‌ها وضعیت هر چک، <strong>روزهای باقی‌مانده تا سررسید</strong> و هشدارِ «سررسید گذشته» را نشان می‌دهد
+و خلاصهٔ آن روی داشبورد می‌آید.</p>
+
+<h3>۹.۳ سنوات بدهی (Aging)</h3>
+<p>گزارش جدیدی که مطالبات/بدهی‌های باز را در بازه‌های <strong>جاری، ۱ تا ۳۰، ۳۱ تا ۶۰، ۶۱ تا ۹۰ و بیش از ۹۰ روز</strong>
+تفکیک می‌کند — ملاک، تاریخ سررسید فاکتور است و در صورت نبود، تاریخ فاکتور به‌علاوهٔ مهلتِ پیش‌فرض (۳۰ روز، قابل تنظیم).</p>
+
+<h3>۹.۴ قفل دوره مالی</h3>
+<pre><span class="c"># پیش از ثبت هر سند، قفل بودنِ ماهِ شمسی بررسی می‌شود</span>
+def _check_period_lock(con, fy, jdate):
+    month = int(str(jdate).split("/")[1])
+    if period_locked(con, fy["id"], month):
+        raise AccountingError(f"ماه {month} از «{fy['title']}» قفل شده است")</pre>
+<p>قفل و باز کردنِ ماه‌ها از برگهٔ تنظیمات انجام می‌شود (ویژهٔ مدیر سیستم).</p>
+
+<h3>۹.۵ پشتیبان‌گیری خودکار</h3>
+<p>با هر بار خروج از برنامه یک نسخهٔ پشتیبان ساخته می‌شود و فقط N نسخهٔ آخر نگهداری می‌گردد
+(تعداد از تنظیمات قابل تغییر است). پشتیبان دستی هم همیشه در دسترس است.</p>
+
+<h3>نتایج تستِ این مرحله</h3>
+<pre>python tests/test_features.py
+── ۱) کاربران، رمز عبور و سطح دسترسی     ۱۲ تست ✅
+── ۲) چک‌های دریافتنی                     ۱۰ تست ✅
+── ۳) چک‌های پرداختنی                      ۶ تست ✅
+── ۴) قفل دوره مالی                        ۴ تست ✅
+── ۵) سنوات بدهی (Aging)                   ۳ تست ✅
+── ۶) پشتیبان خودکار                       ۲ تست ✅
+── ۷) خلاصهٔ چک‌ها برای داشبورد            ۲ تست ✅
+========================================
+نتیجه: 44 موفق / 0 ناموفق</pre>
+
+<div class="danger">
+<strong>یک باگ واقعی که در این مرحله کشف و برطرف شد:</strong>
+نمایِ ماندهٔ اشخاص (<code>v_party_balance</code>) سطرهایی که روی حسابِ غیرمعین‌دار ثبت شده بودند
+(مثل «اسناد دریافتنی») را با علامتِ اشتباه لحاظ می‌کرد، در نتیجه ثبتِ یک چکِ ۵ میلیونی
+ماندهٔ مشتری را ۱۰ میلیون کاهش می‌داد. مشکل با اصلاحِ شرطِ اتصال در نما برطرف و با تست پوشش داده شد.
+</div>
+
+<h2><span class="step">۱۰</span> رفعِ خطایِ ساختِ exe در ویندوز <span class="badge b-new">به‌روزشده</span></h2>
+<p>فایل <code>build_windows.bat</code> روی برخی سیستم‌ها با خطا متوقف می‌شد. چهار علتِ ریشه‌ای داشت
+که همگی برطرف شدند:</p>
+<table>
+<thead><tr><th style="width:34%">علت</th><th>توضیح و رفع</th></tr></thead>
+<tbody>
+<tr><td>سرِخط‌های LF به‌جای CRLF</td>
+<td><code>cmd.exe</code> فایل‌های بچ را فقط با CRLF درست می‌خواند؛ با LF ممکن است دستورها نیمه‌کاره یا خراب اجرا شوند. فایل اکنون با CRLF ذخیره شده است.</td></tr>
+<tr><td>متنِ فارسیِ UTF-8 در فایل بچ</td>
+<td>cmd متنِ فارسی را بر اساس کدپیج (مثلاً ۱۲۵۶) تعبیر می‌کند و نویسه‌ها را خراب می‌کند؛ این خرابی می‌تواند خودِ دستور را هم مخدوش کند. پیام‌های فایل اکنون انگلیسی (ASCII خالص) هستند.</td></tr>
+<tr><td>نبودِ <code>cd /d "%~dp0"</code></td>
+<td>اگر فایل از جای دیگری اجرا شود (مثلاً <em>Run as administrator</em> که از <code>System32</code> شروع می‌شود)، <code>main.py</code> پیدا نمی‌شود: <code>ERROR: Script file 'main.py' does not exist</code>. فایل ابتدا به پوشهٔ خودش می‌رود.</td></tr>
+<tr><td><code>pyinstaller</code> در PATH نیست</td>
+<td>فراخوانیِ مستقیمِ <code>pyinstaller</code> معمولاً با <em>not recognized</em> شکست می‌خورد؛ باید <code>python -m PyInstaller</code> بود.</td></tr>
+</tbody>
+</table>
+
+<h3>۱۰.۱ روشِ جدید</h3>
+<p>کارِ اصلی به یک اسکریپتِ پایتونی منتقل شد تا به هیچ محدودیتی از <code>cmd</code> وابسته نباشد.
+<code>build_windows.bat</code> اکنون فقط وابستگی‌ها را نصب می‌کند و آن را صدا می‌زند.</p>
+<pre><span class="c">:: روشِ پیشنهادی (دابل‌کلیک هم می‌توان کرد)</span>
+python build_exe.py
+
+<span class="c">:: گزینه‌ها</span>
+python build_exe.py --onefile     <span class="c">:: یک فایل exe یکپارچه</span>
+python build_exe.py --console     <span class="c">:: همراه کنسول برای دیدنِ خطاها</span>
+python build_exe.py --dry-run     <span class="c">:: فقط نمایشِ فرمان</span></pre>
+<p>این اسکریپت پیش از ساخت، فایل <code>schema.sql</code> را درون یک ماژولِ پایتونی
+(<code>schema_embedded.py</code>) جاسازی می‌کند؛ بنابراین حتی اگر این فایل در بستهٔ exe گم شود،
+برنامه می‌تواند پایگاه داده را بسازد (یکی از خطاهای رایجِ اجرای exe همین بود).</p>
+
+<h3>۱۰.۲ جدولِ خطاهای رایج</h3>
+<table>
+<thead><tr><th style="width:38%">پیامِ خطا</th><th>رفع</th></tr></thead>
+<tbody>
+<tr><td><code>'python' is not recognized</code></td><td>پایتون را نصب کنید و تیک <strong>Add Python to PATH</strong> را بزنید.</td></tr>
+<tr><td><code>'pyinstaller' is not recognized</code></td><td>از <code>python -m PyInstaller</code> استفاده کنید (اسکریپت همین کار را می‌کند).</td></tr>
+<tr><td><code>ERROR: Script file 'main.py' does not exist</code></td><td>از پوشهٔ پروژه اجرا کنید؛ فایل بچ خودش مسیر را درست می‌کند.</td></tr>
+<tr><td><code>Access is denied</code> هنگام نصب</td><td>با <em>Run as administrator</em> اجرا کنید یا نصبِ <code>--user</code>.</td></tr>
+<tr><td>exe اجرا می‌شود و فوراً بسته می‌شود</td><td>با <code>--console</code> بسازید و خطا را بخوانید؛ معمولاً <code>schema.sql</code> یا پلاگینِ Qt گم شده است.</td></tr>
+<tr><td><code>no Qt platform plugin could be initialized</code></td><td><code>python -m pip install --force-reinstall PySide6</code> و ساختِ دوباره.</td></tr>
+<tr><td>آنتی‌ویروس exe را قرنطینه می‌کند</td><td>هشدارِ شناخته‌شدهٔ بسته‌های PyInstaller؛ برنامه را در فهرستِ سفید بگذارید.</td></tr>
+</tbody>
+</table>
+
+<h3>۱۰.۳ اعتبارسنجی انجام‌شده</h3>
+<pre>python build_exe.py          → Build complete
+ls dist/Hesabdar/_internal/  → schema.sql ✓  libQt6PrintSupport ✓
+اجرای باینریِ ساخته‌شده       → برنامه بالا آمد و منتظرِ پنجرهٔ ورود ماند (بدون خطا)</pre>
+
+<div class="danger">
+<strong>دومین باگ واقعی که هنگامِ اعتبارسنجی کشف و برطرف شد:</strong>
+نامِ فایلِ پشتیبان فقط تا دقتِ «ثانیه» بود (<code>backup-%Y%m%d-%H%M%S.db</code>)؛
+بنابراین اگر دو پشتیبان در یک ثانیه گرفته می‌شد، دومی <strong>اولی را بی‌سر و صدا بازنویسی می‌کرد</strong>
+یعنی نسخهٔ قبلی عملاً از دست می‌رفت. این اشکال با یکتا کردنِ نامِ فایل برطرف شد
+(۱۰ پشتیبانِ پیاپی اکنون ۱۰ فایلِ مجزا می‌سازد) و با تست پوشش داده شد.
+<br><br>
+همچنین اجرای تست‌ها پیش از این نسخه‌های پشتیبان را <em>کنارِ دادهٔ واقعیِ برنامه</em> می‌نوشت؛
+اکنون با متغیرِ <code>ACC_DATA_DIR</code> کاملاً ایزوله است.
+</div>
+
+<h2><span class="step">۱۱</span> گام‌های بعدی (پیشنهادی)</h2>
+<table>
+<thead><tr><th style="width:32%">ویژگی</th><th>توضیح</th><th style="width:14%">اولویت</th></tr></thead>
+<tbody>
+<tr><td>گزارشِ مالیات بر ارزش افزوده</td><td>جمع فروش و خریدِ مشمولِ دوره برای اظهارنامه فصلی</td><td>بالا</td></tr>
+<tr><td>مراکز هزینه / پروژه</td><td>اختصاص هر سطر سند به یک مرکز هزینه و گزارش سود تفکیکی</td><td>متوسط</td></tr>
+<tr><td>بودجه‌بندی</td><td>تعریف بودجهٔ ماهانه و گزارش انحراف عملکرد</td><td>متوسط</td></tr>
+<tr><td>دارایی ثابت و استهلاک</td><td>ثبت دارایی و صدور خودکار سند استهلاک ماهانه</td><td>متوسط</td></tr>
+<tr><td>چندکاربره شبکه‌ای</td><td>انتقال از SQLite به SQL Server Express</td><td>در صورت رشد</td></tr>
+<tr><td>اتصال به سامانه مؤدیان</td><td>صدور صورتحساب الکترونیکی (در صورت مشمول بودن کسب‌وکار)</td><td>بر اساس نیاز</td></tr>
+</tbody>
+</table>
+
+<div class="ok">
+<strong>خلاصه:</strong> شما اکنون یک برنامه حسابداریِ کامل و قابل استفاده دارید —
+هستهٔ دوطرفهٔ استاندارد، انبار با میانگین موزون، فاکتور با صدور سندِ خودکار،
+دریافت و پرداخت، مدیریت چک‌ها، سنوات بدهی، قفل دوره،
+کاربران با چهار سطح دسترسی، گزارشات و پشتیبان‌گیری خودکار.
+<br><br>
+<strong>مجموعِ تست‌ها: ۹۶ مورد (۳۶ منطق + ۴۴ ویژگی‌ها + ۱۶ رابط کاربری) — همه موفق.</strong>
+<br><br>
+قدم بعدیِ منطقی این است که آن را با دادهٔ واقعیِ کسب‌وکارتان یک هفته استفاده کنید
+و سپس ویژگی‌های بالا را به ترتیب اولویت اضافه کنیم.
+</div>
+
+<footer>
+منابع بررسی‌شده در مرحلهٔ نیازمندی‌ها: مقایسهٔ فریم‌ورک‌های دسکتاپ (<a href="https://essenn.associates/blog-desktop-app-frameworks-compared.html">WPF/WinUI/Avalonia/Electron</a>)،
+راهنمای توسعهٔ برنامه‌های دسکتاپ (<a href="https://squashapps.com/blog/desktop-application-development-guide-2021/">Squash Apps</a>)،
+طراحی حسابداری دوطرفه در پایگاه رابطه‌ای (<a href="https://acnttech.com/en/double-entry-accounting-in-a-relational-database/">AccounTech</a>،
+<a href="https://www.balanced.software/double-entry-bookkeeping-for-programmers/">Balanced</a>)،
+و انتخاب پایگاه دادهٔ محلی (<a href="https://www.selecthub.com/relational-database-solutions/sql-server-vs-sqlite/">SQLite در برابر SQL Server</a>).
+</footer>
+
+</div>
+</body>
+</html>
