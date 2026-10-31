@@ -73,7 +73,7 @@ class ProductsTab(QWidget):
         for r in rows:
             qty = float(r.get("stock") or 0)
             cost = int(r.get("avg_cost") or 0)
-            value = repo.rint(qty * cost)
+            value = int(r.get("stock_value") or 0)
             total += value
             if r["track_stock"] and qty <= float(r["stock_min"] or 0):
                 low.append(r["name"])
@@ -139,9 +139,12 @@ class ProductsTab(QWidget):
                                           "purchase_price", "vat_rate", "stock_min")}
             data["track_stock"] = chk.isChecked()
             data["is_active"] = True
-            repo.save_item(self.con, iid, data)
-            self.refresh()
-            msg_info(self, "تغییرات ذخیره شد")
+            try:
+                repo.save_item(self.con, iid, data)
+                self.refresh()
+                msg_info(self, "تغییرات ذخیره شد")
+            except Exception as e:
+                msg_error(self, str(e))
 
     def delete_item(self):
         iid = selected_id(self.table)
@@ -151,8 +154,11 @@ class ProductsTab(QWidget):
         item = repo.get_item(self.con, iid)
         if not msg_ask(self, f"آیا «{item['name']}» حذف/غیرفعال شود؟"):
             return
-        repo.delete_item(self.con, iid)
-        self.refresh()
+        try:
+            repo.delete_item(self.con, iid)
+            self.refresh()
+        except Exception as e:
+            msg_error(self, str(e))
 
     def adjust_stock(self):
         """انبارگردانی: ثبت موجودی واقعی"""
@@ -195,10 +201,13 @@ class ProductsTab(QWidget):
             except ValueError as e:
                 msg_error(self, str(e))
                 return
-            repo.adjust_stock(self.con, iid, qty_edit.value, cost_edit.value, g,
-                              "انبارگردانی دستی")
-            self.refresh()
-            msg_info(self, "موجودی اصلاح شد")
+            try:
+                repo.adjust_stock(self.con, iid, qty_edit.value, cost_edit.value, g,
+                                  "انبارگردانی دستی")
+                self.refresh()
+                msg_info(self, "موجودی اصلاح شد")
+            except Exception as e:
+                msg_error(self, str(e))
 
     def cardex(self):
         iid = selected_id(self.table)

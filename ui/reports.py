@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
+from html import escape
+
 import jalali
 import repo
 import utils
@@ -25,6 +27,9 @@ class ReportsTab(QWidget):
         ("profit", "صورت سود و زیان"),
         ("trial", "تراز آزمایشی"),
         ("ledger", "دفتر حساب (گردش یک حساب)"),
+        ("journal", "دفتر روزنامه"),
+        ("balance_sheet", "ترازنامه"),
+        ("reconciliation", "کنترل سازگاری انبار و دفاتر"),
     ]
 
     def __init__(self, con, parent=None):
@@ -44,7 +49,7 @@ class ReportsTab(QWidget):
         self.to_date = DateEdit(with_today_button=False)
         jy = jalali.gregorian_to_jalali(*map(int, utils.today_g().split("-")))[0]
         self.from_date.set_jalali(f"{jy}/01/01")
-        self.to_date.set_jalali(f"{jy}/12/29")
+        self.to_date.set_jalali(jalali.to_jalali_str(jalali.end_of_jalali_year(jy)))
         self.account = QComboBox()
         for a in self.con.execute(
                 "SELECT code, name FROM accounts WHERE is_postable=1 ORDER BY code"):
@@ -99,8 +104,8 @@ class ReportsTab(QWidget):
     def run(self):
         kind = self.combo.currentData()
         self.account.setVisible(kind == "ledger")
-        self.from_date.setEnabled(kind in ("sales", "profit", "ledger"))
-        self.to_date.setEnabled(kind in ("sales", "profit", "ledger"))
+        self.from_date.setEnabled(kind in ("sales", "profit", "ledger", "journal"))
+        self.to_date.setEnabled(kind in ("sales", "profit", "ledger", "journal"))
         if kind in ("aging_c", "aging_s"):
             self.from_date.setEnabled(False)
             self.to_date.setEnabled(False)
@@ -226,6 +231,39 @@ class ReportsTab(QWidget):
         self.summary.setText(f"گردش حساب «{name['name'] if name else code}»  |  "
                              f"ماندهٔ پایانی: {utils.fmt(bal)} ریال")
 
+    def _journal(self):
+        d1, d2 = self._range()
+        rows = repo.report_journal(self.con, d1, d2)
+        self._reset(["شماره سند", "تاریخ", "نوع", "مرجع", "ثبت‌کننده", "بدهکار", "بستانکار", "شرح"])
+        for r in rows:
+            add_row(self.table, [r["no"], r["jalali_date"], r["entry_type"], r["reference_no"] or "",
+                                 r["posted_by"] or "", utils.fmt(r["debit"]), utils.fmt(r["credit"]),
+                                 r["description"] or ""], data=r["id"])
+        self.summary.setText(f"تعداد اسناد قطعی: {len(rows)}")
+
+    def _balance_sheet(self):
+        r = repo.report_balance_sheet(self.con, self._range()[1])
+        self._reset(["کد", "حساب", "نوع", "مانده (ریال)"])
+        types = {"asset": "دارایی", "liability": "بدهی", "equity": "حقوق صاحبان سهام",
+                 "revenue": "درآمد", "expense": "هزینه"}
+        for row in r["rows"]:
+            if row["bal"]:
+                add_row(self.table, [row["code"], row["name"], types.get(row["type"], row["type"]), utils.fmt(row["bal"])])
+        ok = "✅ دارایی = بدهی + حقوق صاحبان سهام" if r["balanced"] else "❌ ترازنامه متوازن نیست"
+        self.summary.setText(f"دارایی: {utils.fmt(r['assets'])}  |  بدهی: {utils.fmt(r['liabilities'])}  |  "
+                             f"حقوق صاحبان سهام: {utils.fmt(r['equity'])}  |  {ok}")
+
+    def _reconciliation(self):
+        r = repo.report_reconciliation(self.con)
+        self._reset(["کنترل", "مقدار", "وضعیت"])
+        add_row(self.table, ["ارزش انبار (کاردکس)", utils.fmt(r["stock_report"]), ""])
+        add_row(self.table, ["مانده حساب موجودی کالا", utils.fmt(r["inventory_gl"]), ""])
+        add_row(self.table, ["مغایرت", utils.fmt(r["stock_difference"]), "✅ صفر" if not r["stock_difference"] else "⚠️ بررسی شود"])
+        add_row(self.table, ["تراز آزمایشی", "", "✅ متوازن" if r["trial"]["balanced"] else "❌ نامتوازن"])
+        add_row(self.table, ["ترازنامه", "", "✅ متوازن" if r["balance_sheet"]["balanced"] else "❌ نامتوازن"])
+        add_row(self.table, ["پرداخت‌های ناسازگار", str(len(r["invalid_payments"])), "✅" if not r["invalid_payments"] else "⚠️"])
+        self.summary.setText("این گزارش برای پایش سلامت داده‌ها پس از مهاجرت و عملیات روزانه است.")
+
     # ------------------------------------------------------------------
     def export(self):
         export_csv(self, self.table, self.combo.currentData())
@@ -236,17 +274,17 @@ class ReportsTab(QWidget):
             return
         cols = [self.table.horizontalHeaderItem(i).text()
                 for i in range(self.table.columnCount())]
-        head = "".join(f"<th style='padding:6px;border:1px solid #ccc'>{c}</th>" for c in cols)
+        head = "".join(f"<th style='padding:6px;border:1px solid #ccc'>{escape(c)}</th>" for c in cols)
         body = ""
         for r in range(self.table.rowCount()):
             tds = "".join(
                 f"<td style='padding:5px;border:1px solid #ccc'>"
-                f"{self.table.item(r, c).text() if self.table.item(r, c) else ''}</td>"
+                f"{escape(self.table.item(r, c).text() if self.table.item(r, c) else '')}</td>"
                 for c in range(self.table.columnCount()))
             body += f"<tr>{tds}</tr>"
         html = f"""<html><body dir="rtl" style="font-family:Tahoma;font-size:11px">
-        <h3 style="text-align:center">{self.combo.currentText()}</h3>
+        <h3 style="text-align:center">{escape(self.combo.currentText())}</h3>
         <table width="100%" style="border-collapse:collapse" dir="rtl">
         <tr style="background:#eef3f7">{head}</tr>{body}</table>
-        <p>{self.summary.text()}</p></body></html>"""
+        <p>{escape(self.summary.text())}</p></body></html>"""
         print_html(self, html, self.combo.currentData())

@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QPushButton, QVBoxLayout, QWidget,
 )
 
+from html import escape
+
 import jalali
 import repo
 import utils
@@ -98,17 +100,24 @@ class PaymentsTab(QWidget):
         form.insertRow(2, "روش پرداخت", method)
 
         invoice = QComboBox()
-        invoice.addItem("— بدون ارجاع به فاکتور —", None)
-        inv_kind = "sale" if direction == "receipt" else "purchase"
-        for inv in repo.list_invoices(self.con, inv_kind, status="confirmed"):
-            rem = inv["total"] - inv["paid_amount"]
-            if rem > 0:
-                invoice.addItem(f"فاکتور #{inv['no']} — مانده {utils.fmt(rem)} ریال", inv["id"])
         form.insertRow(3, "تسویه فاکتور", invoice)
         d.resize(460, 340)
         d.party_combo = party
         d.method_combo = method
         d.invoice_combo = invoice
+        inv_kind = "sale" if direction == "receipt" else "purchase"
+        def reload_invoices():
+            invoice.clear()
+            invoice.addItem("— بدون ارجاع به فاکتور —", None)
+            pid = party.currentData()
+            if not pid:
+                return
+            for inv in repo.list_invoices(self.con, inv_kind, party_id=pid, status="confirmed"):
+                rem = inv["total"] - inv["paid_amount"]
+                if rem > 0:
+                    invoice.addItem(f"فاکتور #{inv['no']} — مانده {utils.fmt(rem)} ریال", inv["id"])
+        party.currentIndexChanged.connect(reload_invoices)
+        reload_invoices()
         return d
 
     def new_receipt(self):
@@ -160,14 +169,14 @@ class PaymentsTab(QWidget):
         company = {r["key"]: r["value"] for r in self.con.execute("SELECT key, value FROM settings")}
         html = f"""
         <html><body dir="rtl" style="font-family:Tahoma;font-size:13px">
-        <h2 style="text-align:center;margin:2px">{company.get('company_name','')}</h2>
+        <h2 style="text-align:center;margin:2px">{escape(company.get('company_name',''))}</h2>
         <h3 style="text-align:center;margin:4px">{'رسید دریافت' if p['direction']=='receipt' else 'رسید پرداخت'} شماره {p['no']}</h3>
         <hr>
         <p>تاریخ: {p['jalali_date']}</p>
-        <p>{'دریافت از:' if p['direction']=='receipt' else 'پرداخت به:'} <b>{p['party_name']}</b></p>
+        <p>{'دریافت از:' if p['direction']=='receipt' else 'پرداخت به:'} <b>{escape(p['party_name'])}</b></p>
         <p>مبلغ: <b>{utils.fmt(p['amount'])} ریال</b></p>
         <p>روش: {METHOD_LABEL.get(p['method'], p['method'])}</p>
-        <p>شرح: {p['description'] or '-'}</p>
+        <p>شرح: {escape(p['description'] or '-')}</p>
         {'<p style="color:#b3261e"><b>این رسید ابطال شده است</b></p>' if p['is_cancelled'] else ''}
         <br><br>
         <table width="100%"><tr>

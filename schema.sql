@@ -9,6 +9,7 @@
 -- =====================================================================
 
 PRAGMA foreign_keys = ON;
+PRAGMA user_version = 2;
 
 -- ---------------------------------------------------------------------
 -- تنظیمات عمومی (نرخ مالیات، مشخصات شرکت، واحد نمایش پول)
@@ -112,6 +113,7 @@ CREATE TABLE IF NOT EXISTS stock_moves (
     move_date   TEXT    NOT NULL,                 -- ISO
     qty         REAL    NOT NULL,                 -- علامت‌دار
     unit_cost   INTEGER NOT NULL DEFAULT 0,       -- ریال (میانگین موزون در لحظهٔ حرکت)
+    value       INTEGER NOT NULL DEFAULT 0,       -- ارزش کل حرکت به ریال (علامت‌دار، دقیق)
     move_type   TEXT    NOT NULL CHECK (move_type IN
                     ('opening','purchase','sale','sale_return',
                      'purchase_return','adjust')),
@@ -147,7 +149,10 @@ CREATE TABLE IF NOT EXISTS invoices (
     journal_entry_id INTEGER REFERENCES journal_entries(id),
     description     TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (kind, no)
+    cogs_amount     INTEGER NOT NULL DEFAULT 0,
+    stock_amount    INTEGER NOT NULL DEFAULT 0,
+    expense_amount  INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (kind, fiscal_year_id, no)
 );
 CREATE INDEX IF NOT EXISTS ix_inv_party ON invoices(party_id);
 CREATE INDEX IF NOT EXISTS ix_inv_date  ON invoices(inv_date);
@@ -206,6 +211,9 @@ CREATE TABLE IF NOT EXISTS journal_entries (
                    CHECK (status IN ('draft','posted')),
     created_at     TEXT NOT NULL DEFAULT (datetime('now')),
     posted_at      TEXT,
+    created_by     INTEGER REFERENCES users(id),
+    posted_by      INTEGER REFERENCES users(id),
+    reversed_entry_id INTEGER REFERENCES journal_entries(id),
     UNIQUE (fiscal_year_id, no)
 );
 CREATE INDEX IF NOT EXISTS ix_je_date ON journal_entries(entry_date);
@@ -244,7 +252,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action     TEXT NOT NULL,
     table_name TEXT,
     record_id  INTEGER,
-    detail     TEXT
+    detail     TEXT,
+    user_id    INTEGER,
+    username   TEXT,
+    role       TEXT,
+    before_json TEXT,
+    after_json  TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_audit_ts ON audit_log(ts);
 
@@ -267,6 +280,35 @@ BEGIN
     SELECT RAISE(ABORT, 'سطر سند قطعی‌شده قابل حذف نیست');
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_lines_no_insert_posted
+BEFORE INSERT ON journal_lines
+WHEN EXISTS (SELECT 1 FROM journal_entries e
+             WHERE e.id = NEW.entry_id AND e.status = 'posted')
+BEGIN
+    SELECT RAISE(ABORT, 'افزودن سطر به سند قطعی‌شده مجاز نیست');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entry_no_update_posted
+BEFORE UPDATE ON journal_entries
+WHEN OLD.status = 'posted'
+BEGIN
+    SELECT RAISE(ABORT, 'سند قطعی‌شده تغییرناپذیر است؛ فقط سند اصلاحی/معکوس ثبت کنید');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entry_no_delete_posted
+BEFORE DELETE ON journal_entries
+WHEN OLD.status = 'posted'
+BEGIN
+    SELECT RAISE(ABORT, 'حذف سند قطعی‌شده مجاز نیست؛ از سند معکوس استفاده کنید');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_entry_no_direct_posted
+BEFORE INSERT ON journal_entries
+WHEN NEW.status = 'posted'
+BEGIN
+    SELECT RAISE(ABORT, 'سند باید ابتدا پیش‌نویس ایجاد و سپس قطعی شود');
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_entry_must_balance
 BEFORE UPDATE OF status ON journal_entries
 WHEN NEW.status = 'posted' AND OLD.status <> 'posted'
@@ -275,6 +317,38 @@ BEGIN
     WHERE (SELECT COALESCE(SUM(debit),0)  FROM journal_lines WHERE entry_id = NEW.id)
        <> (SELECT COALESCE(SUM(credit),0) FROM journal_lines WHERE entry_id = NEW.id)
        OR (SELECT COUNT(*) FROM journal_lines WHERE entry_id = NEW.id) < 2;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_no_edit_confirmed
+BEFORE UPDATE ON invoices
+WHEN OLD.status <> 'draft' AND (
+     NEW.party_id IS NOT OLD.party_id OR NEW.kind IS NOT OLD.kind OR
+     NEW.inv_date IS NOT OLD.inv_date OR NEW.subtotal IS NOT OLD.subtotal OR
+     NEW.discount IS NOT OLD.discount OR NEW.vat_amount IS NOT OLD.vat_amount OR
+     NEW.total IS NOT OLD.total OR NEW.fiscal_year_id IS NOT OLD.fiscal_year_id)
+BEGIN
+    SELECT RAISE(ABORT, 'فاکتور قطعی/ابطال‌شده قابل ویرایش نیست');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_no_delete_confirmed
+BEFORE DELETE ON invoices
+WHEN OLD.status <> 'draft'
+BEGIN
+    SELECT RAISE(ABORT, 'حذف فاکتور قطعی/ابطال‌شده مجاز نیست');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_edit_confirmed
+BEFORE UPDATE ON invoice_lines
+WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.id = OLD.invoice_id AND i.status <> 'draft')
+BEGIN
+    SELECT RAISE(ABORT, 'سطر فاکتور قطعی‌شده قابل ویرایش نیست');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_delete_confirmed
+BEFORE DELETE ON invoice_lines
+WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.id = OLD.invoice_id AND i.status <> 'draft')
+BEGIN
+    SELECT RAISE(ABORT, 'سطر فاکتور قطعی‌شده قابل حذف نیست');
 END;
 
 -- =====================================================================
@@ -354,7 +428,8 @@ INSERT OR IGNORE INTO accounts (id, code, name, parent_id, type, level, is_posta
  (22, '501',   'بهای تمام‌شده کالای فروخته‌شده', 21,  'expense',   2, 1, 0, 1),
  (23, '502',   'هزینه‌های اداری و عمومی',       21,   'expense',   2, 1, 0, 1),
  (24, '503',   'هزینه حقوق و دستمزد',           21,   'expense',   2, 1, 0, 1),
- (25, '504',   'هزینه حمل و نقل',               21,   'expense',   2, 1, 0, 1);
+ (25, '504',   'هزینه حمل و نقل',               21,   'expense',   2, 1, 0, 1),
+ (26, '505',   'تعدیلات و ضایعات انبار',          21,   'expense',   2, 1, 0, 1);
 
 -- =====================================================================
 --  بخش دومِ شِما (افزوده‌شده در مرحلهٔ ۹)

@@ -16,6 +16,9 @@ os.environ["ACC_DATA_DIR"] = os.path.dirname(TMP)
 import db          # noqa: E402
 import jalali      # noqa: E402
 import repo        # noqa: E402
+import auth        # noqa: E402
+
+_SERVICE = auth.service_mode(); _SERVICE.__enter__()
 
 con = db.connect()
 db.init_db(con)
