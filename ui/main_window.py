@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 
 import auth
 import db
+import business_profiles
 import repo
 import utils
 from ui.cheques import ChequesTab
@@ -42,7 +43,7 @@ class MainWindow(QMainWindow):
             load_font(app)
             apply_theme(app, "light")
             app.setProperty("theme_mode", "light")
-        self.setWindowTitle("حسابداری نوین — کسب‌وکار کوچک")
+        self.setWindowTitle("حسابداری نوین — حسابداری چندپروفایلی")
         self.resize(1320, 820)
         self.setLayoutDirection(Qt.RightToLeft)
 
@@ -55,8 +56,9 @@ class MainWindow(QMainWindow):
         sidebar = QFrame(); sidebar.setObjectName("Sidebar"); sidebar.setFixedWidth(230)
         side = QVBoxLayout(sidebar); side.setContentsMargins(12, 8, 12, 12); side.setSpacing(4)
         brand = QLabel("حسابداری نوین"); brand.setObjectName("Brand")
-        sub = QLabel("نسخهٔ کاربردی کسب‌وکار کوچک"); sub.setObjectName("BrandSub")
-        side.addWidget(brand); side.addWidget(sub)
+        self.profile_label = QLabel(""); self.profile_label.setObjectName("BrandSub")
+        self.profile_label.setWordWrap(True)
+        side.addWidget(brand); side.addWidget(self.profile_label)
         self.nav_group = QButtonGroup(self)
         self.nav_buttons = []
         for i, (ic, title, hint) in enumerate(self.PAGES):
@@ -119,7 +121,32 @@ class MainWindow(QMainWindow):
         u = auth.current() or {}
         self.user_label.setText(f"{u.get('full_name') or u.get('username', '')}\n{auth.role_label(u.get('role', ''))}")
         self.apply_permissions()
+        self.refresh_business_profile()
         self.open_tab(0)
+        self.woo_worker = None
+        self.restart_woo_worker()
+
+    def refresh_business_profile(self):
+        p = business_profiles.current(self.con)
+        self.profile_label.setText(p["title"])
+        module_for_index = {1: "parties", 2: "items", 3: "invoices", 4: "payments", 5: "cheques", 6: "reports"}
+        for i, btn in enumerate(self.nav_buttons):
+            module = module_for_index.get(i)
+            btn.setVisible(module is None or business_profiles.module_enabled(self.con, module))
+        if hasattr(self, "dashboard"):
+            self.dashboard.refresh()
+
+    def restart_woo_worker(self):
+        old = getattr(self, "woo_worker", None)
+        if old and old.is_alive():
+            old.stop()
+            old.join(timeout=3)
+        self.woo_worker = None
+        if db.get_setting(self.con, "woo_enabled", "0") == "1":
+            from woo_sync import WooSyncWorker
+            interval = int(db.get_setting(self.con, "woo_interval", "20") or 20)
+            self.woo_worker = WooSyncWorker(interval)
+            self.woo_worker.start()
 
     def apply_permissions(self):
         blocked = 0
@@ -153,6 +180,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if QMessageBox.question(self, "خروج", "آیا از برنامه خارج می‌شوید؟",
                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            worker = getattr(self, "woo_worker", None)
+            if worker and worker.is_alive():
+                worker.stop(); worker.join(timeout=3)
             path = db.auto_backup(self.con, "exit")
             if path:
                 self.statusBar().showMessage(f"پشتیبان خروج: {path}")
@@ -216,6 +246,10 @@ class DashboardTab(QWidget):
         lay.addLayout(quick)
 
     def refresh(self):
+        p = business_profiles.current(self.con)
+        visible_kpis = set(p["kpis"])
+        for key, card in self.cards.items():
+            card.setVisible(key in visible_kpis)
         d = repo.dashboard(self.con)
         s = d["sales"]
         f = lambda v: repo.fmt_money(self.con, v, with_unit=True)

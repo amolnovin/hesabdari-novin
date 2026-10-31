@@ -2,11 +2,14 @@
 """برگهٔ کالاها، خدمات و انبار"""
 
 from PySide6.QtCore import Qt
+import json
+
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QVBoxLayout, QWidget,
 )
 
+import business_profiles
 import repo
 import utils
 from ui.widgets import (
@@ -55,7 +58,7 @@ class ProductsTab(QWidget):
 
         self.table = make_table(
             ["شناسه", "کد", "نام", "واحد", "قیمت فروش", "نرخ مالیات٪",
-             "موجودی", "میانگین بهای تمام‌شده", "ارزش موجودی (ریال)", "حداقل موجودی"])
+             "موجودی", "میانگین بهای تمام‌شده", "ارزش موجودی (ریال)", "حداقل موجودی", "ویژگی‌های پروفایل"])
         lay.addWidget(self.table)
 
         self.summary = QLabel("")
@@ -77,11 +80,16 @@ class ProductsTab(QWidget):
             total += value
             if r["track_stock"] and qty <= float(r["stock_min"] or 0):
                 low.append(r["name"])
+            try:
+                meta = json.loads(r.get("metadata_json") or "{}")
+                features = " | ".join(f"{k}: {v}" for k, v in meta.items() if v)
+            except Exception:
+                features = ""
             add_row(self.table, [
                 r["id"], r["code"] or "", r["name"], r["unit"],
                 utils.fmt(r["sale_price"]), f"{r['vat_rate']:g}",
                 utils.fmt_qty(qty), utils.fmt(cost), utils.fmt(value),
-                utils.fmt_qty(r["stock_min"]),
+                utils.fmt_qty(r["stock_min"]), features,
             ], data=r["id"])
             if r["track_stock"] and qty <= float(r["stock_min"] or 0):
                 for c in range(self.table.columnCount()):
@@ -93,25 +101,39 @@ class ProductsTab(QWidget):
 
     # ------------------------------------------------------------------
     def _dialog(self, item=None):
-        d = FormDialog(
-            self, "کالا / خدمت",
-            [("name", "نام *", "text"),
-             ("code", "کد کالا", "text"),
+        profile = business_profiles.current(self.con)
+        fields = [("name", "نام *", "text"),
+             ("code", "کد کالا / SKU", "text"),
              ("unit", "واحد اندازه‌گیری", "text"),
              ("sale_price", "قیمت فروش (ریال)", "money"),
              ("purchase_price", "آخرین قیمت خرید (ریال)", "money"),
              ("vat_rate", "نرخ مالیات (درصد)", "number"),
-             ("stock_min", "حداقل موجودی (هشدار)", "number")],
-            dict(item) if item else {"unit": "عدد", "vat_rate": float(repo.db.get_setting(self.con, "default_vat_rate", "10"))},
-        )
+             ("stock_min", "حداقل موجودی (هشدار)", "number")]
+        labels = {"barcode": "بارکد", "expiry": "تاریخ انقضا", "weight": "وزن/مقدار پایه",
+                  "variant": "سایز/رنگ/تنوع", "season": "فصل", "brand": "برند",
+                  "serial": "شماره سریال/IMEI", "warranty": "گارانتی", "oem": "کد فنی/OEM",
+                  "isbn": "شابک/ISBN"}
+        try:
+            meta = json.loads(item["metadata_json"] or "{}") if item else {}
+        except Exception:
+            meta = {}
+        initial = dict(item) if item else {
+            "unit": repo.db.get_setting(self.con, "default_item_unit", profile["unit"]),
+            "vat_rate": float(repo.db.get_setting(self.con, "default_vat_rate", "10"))}
+        for key in profile["item_fields"]:
+            field = "meta_" + key
+            fields.append((field, labels.get(key, key), "text"))
+            initial[field] = meta.get(key, "")
+        d = FormDialog(self, "کالا / خدمت", fields, initial)
+        d._profile_metadata = meta
         chk = QCheckBox("این مورد انبار می‌شود (موجودی دارد)")
-        chk.setChecked(bool(item["track_stock"]) if item else True)
+        chk.setChecked(bool(item["track_stock"]) if item else repo.db.get_setting(self.con, "default_track_stock", "1") == "1")
         d.layout().itemAt(0).layout().insertRow(7, "", chk)
-        d.resize(460, 380)
-        return d, chk
+        d.resize(520, 520)
+        return d, chk, profile["item_fields"]
 
     def new_item(self):
-        d, chk = self._dialog()
+        d, chk, profile_fields = self._dialog()
         if d.exec():
             try:
                 data = {k: d.get(k) for k in ("name", "code", "unit", "sale_price",
@@ -121,6 +143,8 @@ class ProductsTab(QWidget):
                     return
                 data["track_stock"] = chk.isChecked()
                 data["is_active"] = True
+                meta = {**d._profile_metadata, **{k: d.get("meta_" + k) for k in profile_fields}}
+                data["metadata"] = {k: v for k, v in meta.items() if v}
                 repo.save_item(self.con, None, data)
                 self.refresh()
                 msg_info(self, "کالا ثبت شد")
@@ -133,12 +157,14 @@ class ProductsTab(QWidget):
             msg_warn(self, "ابتدا یک ردیف را انتخاب کنید")
             return
         item = repo.get_item(self.con, iid)
-        d, chk = self._dialog(item)
+        d, chk, profile_fields = self._dialog(item)
         if d.exec():
             data = {k: d.get(k) for k in ("name", "code", "unit", "sale_price",
                                           "purchase_price", "vat_rate", "stock_min")}
             data["track_stock"] = chk.isChecked()
             data["is_active"] = True
+            meta = {**d._profile_metadata, **{k: d.get("meta_" + k) for k in profile_fields}}
+            data["metadata"] = {k: v for k, v in meta.items() if v}
             try:
                 repo.save_item(self.con, iid, data)
                 self.refresh()

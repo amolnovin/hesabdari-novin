@@ -15,7 +15,7 @@ import jalali
 
 APP_NAME = "SmallBizAccounting"
 DB_FILE_NAME = "accounting.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 _local = threading.local()
 last_backup_error: str | None = None
 
@@ -45,6 +45,11 @@ def data_dir() -> str:
     override = os.environ.get("ACC_DATA_DIR")
     if override:
         os.makedirs(override, exist_ok=True)
+        if os.name != "nt":
+            try:
+                os.chmod(override, 0o700)
+            except OSError:
+                pass
         return override
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
@@ -54,6 +59,11 @@ def data_dir() -> str:
         base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
     path = os.path.join(base, APP_NAME)
     os.makedirs(path, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
     return path
 
 
@@ -66,12 +76,24 @@ def db_path() -> str:
 def backup_dir() -> str:
     path = os.path.join(data_dir(), "backups")
     os.makedirs(path, exist_ok=True)
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
     return path
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
     con = sqlite3.connect(path or db_path(), isolation_level=None, timeout=30)
     con.row_factory = sqlite3.Row
+    if os.name != "nt":
+        try:
+            db_file = con.execute("PRAGMA database_list").fetchone()[2]
+            if db_file:
+                os.chmod(db_file, 0o600)
+        except OSError:
+            pass
     con.execute("PRAGMA foreign_keys = ON")
     con.execute("PRAGMA journal_mode = WAL")
     con.execute("PRAGMA busy_timeout = 30000")
@@ -219,6 +241,11 @@ def make_backup(con: sqlite3.Connection, label: str = "manual", *, require_permi
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     target = os.path.join(backup_dir(), f"backup-{stamp}-{_safe_label(label)}.db")
     con.execute("VACUUM INTO ?", (target,))
+    if os.name != "nt":
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
     check = sqlite3.connect(target)
     try:
         ok = check.execute("PRAGMA integrity_check").fetchone()[0]
@@ -269,8 +296,18 @@ def stage_restore(con: sqlite3.Connection, path: str) -> dict:
         src.backup(dst)
     finally:
         dst.close(); src.close()
+    if os.name != "nt":
+        try:
+            os.chmod(staged, 0o600)
+        except OSError:
+            pass
     with open(pending, "w", encoding="utf-8") as f:
         json.dump({"staged": staged, "source": path, "requested_at": datetime.now().isoformat()}, f, ensure_ascii=False)
+    if os.name != "nt":
+        try:
+            os.chmod(pending, 0o600)
+        except OSError:
+            pass
     audit(con, "restore_staged", "database", None, path)
     con.commit()
     return info

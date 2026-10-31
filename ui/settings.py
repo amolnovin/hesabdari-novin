@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 import auth
 import db
+import business_profiles
 import jalali
 import repo
 import utils
@@ -57,12 +58,29 @@ class SettingsTab(QWidget):
         ]:
             form.addRow(label, w)
         lay.addLayout(form)
+        self.vat_warning = QLabel("نرخ مالیات از پروفایل حدس زده نمی‌شود؛ نرخ/معافیت هر کالا را با مقررات جاری و مشاور مالیاتی بررسی کنید.")
+        self.vat_warning.setWordWrap(True)
+        self.vat_warning.setStyleSheet("color:#9a3412;background:#fff7ed;padding:7px;border-radius:5px")
+        lay.addWidget(self.vat_warning)
 
         btns = QHBoxLayout()
         b_save = QPushButton("💾 ذخیره تنظیمات")
         b_save.setStyleSheet("QPushButton{background:#1f5f8b;color:#fff;padding:8px 16px;border-radius:6px;font-weight:bold}")
         b_save.clicked.connect(self.save)
         btns.addWidget(b_save)
+        self.profile_combo = QComboBox()
+        for key, title, description in business_profiles.list_profiles():
+            self.profile_combo.addItem(title, key)
+            self.profile_combo.setItemData(self.profile_combo.count() - 1, description, Qt.ToolTipRole)
+        self.profile_desc = QLabel(""); self.profile_desc.setWordWrap(True)
+        self.profile_combo.currentIndexChanged.connect(self._profile_preview)
+        b_profile = QPushButton("اعمال نوع کسب‌وکار")
+        b_profile.clicked.connect(self.save_profile)
+        btns.addWidget(self.profile_combo); btns.addWidget(b_profile)
+        self.b_woo = QPushButton("🛒 تنظیم اتصال ووکامرس")
+        self.b_woo.clicked.connect(self.open_woo_settings)
+        btns.addWidget(self.b_woo)
+        lay.addWidget(self.profile_desc)
         lay.addLayout(btns)
 
         # --- پشتیبان‌گیری ---
@@ -136,10 +154,42 @@ class SettingsTab(QWidget):
 
         self.load_accounts()
 
+    def _profile_preview(self, *_):
+        p = business_profiles.get_profile(self.profile_combo.currentData())
+        self.profile_desc.setText(f"{p['description']} امکانات پیشنهادی: {', '.join(p['modules'])}. {p['note']} نرخ مالیات به‌صورت خودکار تغییر نمی‌کند؛ آن را طبق مقررات جاری تنظیم کنید.")
+
+    def save_profile(self):
+        try:
+            p = business_profiles.apply_profile(self.con, self.profile_combo.currentData())
+            self.profile_desc.setText(f"پروفایل «{p['title']}» اعمال شد. واحد پول و نرخ مالیات موجود تغییر نکرد تا اطلاعات ثبت‌شده دست‌کاری نشود.")
+            mw = self.parent()
+            if mw and hasattr(mw, "refresh_business_profile"):
+                mw.refresh_business_profile()
+            msg_info(self, "نوع کسب‌وکار و امکانات پیشنهادی ذخیره شد.")
+        except Exception as e:
+            msg_error(self, str(e))
+
+    def open_woo_settings(self):
+        from ui.woo_settings import WooSettingsDialog
+        dlg = WooSettingsDialog(self.con, worker_getter=lambda: getattr(self.parent(), "woo_worker", None), parent=self)
+        dlg.exec()
+        self._load_business_profile()
+
+    def restart_woo_worker(self):
+        mw = self.parent()
+        if mw and hasattr(mw, "restart_woo_worker"):
+            mw.restart_woo_worker()
+
+    def _load_business_profile(self):
+        key = business_profiles.current_key(self.con)
+        self.profile_combo.setCurrentIndex(max(0, self.profile_combo.findData(key)))
+        self._profile_preview()
+
     # ------------------------------------------------------------------
     def load(self):
         g = lambda k, d="": db.get_setting(self.con, k, d)
         self.f_company.setText(g("company_name"))
+        self._load_business_profile()
         self.f_national.setText(g("company_national_id"))
         self.f_economic.setText(g("company_economic_code"))
         self.f_address.setText(g("company_address"))

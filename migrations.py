@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""مهاجرت امن پایگاه داده از نسخهٔ اولیه به نسخهٔ ۲.
+"""مهاجرت امن پایگاه داده از نسخه‌های قدیمی تا نسخهٔ ۴.
 
 اصل‌ها:
 - هیچ سند قطعی حذف یا بازنویسی مالی نمی‌شود.
@@ -14,7 +14,7 @@ from datetime import date
 
 import jalali
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 REQUIRED_TABLES = {
     "settings", "fiscal_year", "accounts", "parties", "items", "stock_moves",
     "invoices", "invoice_lines", "payments", "journal_entries", "journal_lines",
@@ -70,6 +70,19 @@ def migrate(con: sqlite3.Connection) -> list[str]:
     if "journal_entries" not in tables:
         return warnings
 
+    if version < 2:
+        warnings += _migrate_v2(con)
+    if version < 3:
+        warnings += _migrate_v3(con)
+    if version < 4:
+        warnings += _migrate_v4(con)
+    if version < 5:
+        warnings += _migrate_v5(con)
+    return warnings
+
+
+def _migrate_v2(con: sqlite3.Connection) -> list[str]:
+    warnings: list[str] = []
     con.execute("PRAGMA foreign_keys=OFF")
     con.execute("BEGIN")
     try:
@@ -162,3 +175,64 @@ def migrate(con: sqlite3.Connection) -> list[str]:
     finally:
         con.execute("PRAGMA foreign_keys=ON")
     return warnings
+
+
+def _migrate_v3(con: sqlite3.Connection) -> list[str]:
+    """افزودن جداول همگام‌سازی ووکامرس و پروفایل کسب‌وکار."""
+    warnings: list[str] = []
+    con.execute("BEGIN")
+    try:
+        statements = [
+            "CREATE TABLE IF NOT EXISTS woo_map (entity TEXT NOT NULL, local_id INTEGER NOT NULL, remote_id INTEGER NOT NULL, remote_parent_id INTEGER, remote_updated TEXT, local_hash TEXT, remote_hash TEXT, last_synced TEXT, PRIMARY KEY (entity, local_id), UNIQUE (entity, remote_id))",
+            "CREATE INDEX IF NOT EXISTS ix_woo_map_remote ON woo_map(entity, remote_id)",
+            "CREATE TABLE IF NOT EXISTS woo_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, local_id INTEGER, action TEXT NOT NULL, payload TEXT, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','done','error','skipped')), attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT)",
+            "CREATE INDEX IF NOT EXISTS ix_woo_queue_status ON woo_queue(status, created_at)",
+            "CREATE TABLE IF NOT EXISTS woo_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), direction TEXT NOT NULL, entity TEXT NOT NULL, remote_id INTEGER, local_id INTEGER, status TEXT NOT NULL, message TEXT)",
+            "CREATE INDEX IF NOT EXISTS ix_woo_log_ts ON woo_log(ts)",
+            "CREATE TABLE IF NOT EXISTS woo_state (key TEXT PRIMARY KEY, value TEXT)",
+            "CREATE TABLE IF NOT EXISTS woo_events (id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT NOT NULL, remote_id INTEGER, payload TEXT, status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','done','error')), created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+        ]
+        for statement in statements:
+            con.execute(statement)
+        defaults = {
+            'business_profile':'online_digital', 'woo_enabled':'0', 'woo_url':'',
+            'woo_consumer_key':'', 'woo_consumer_secret':'', 'woo_query_auth':'0',
+            'woo_price_factor':'10', 'woo_interval':'20', 'woo_stock_master':'accounting',
+            'woo_sync_products':'1', 'woo_sync_orders':'1', 'woo_sync_customers':'1',
+            'woo_sync_stock':'1', 'woo_webhook_enabled':'0',
+            'woo_webhook_port':'8765', 'woo_webhook_secret':''
+        }
+        con.executemany("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", defaults.items())
+        con.execute("PRAGMA user_version=3")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return warnings
+
+
+def _migrate_v4(con: sqlite3.Connection) -> list[str]:
+    """افزودن فیلدهای اختصاصی پروفایل کسب‌وکار به کالاها."""
+    con.execute("BEGIN")
+    try:
+        _add_col(con, "items", "metadata_json", "TEXT NOT NULL DEFAULT '{}'" )
+        con.execute("INSERT OR IGNORE INTO settings(key,value) VALUES ('profile_vat_review_required','1')")
+        con.execute("PRAGMA user_version=4")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return []
+
+
+def _migrate_v5(con: sqlite3.Connection) -> list[str]:
+    """افزودن ایمیل طرف‌حساب برای همگام‌سازی معتبر مشتری WooCommerce."""
+    con.execute("BEGIN")
+    try:
+        _add_col(con, "parties", "email", "TEXT")
+        con.execute("PRAGMA user_version=5")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return []

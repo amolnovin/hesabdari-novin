@@ -3,15 +3,31 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 import repo
 import utils
 from ui.widgets import (
-    DateEdit, FormDialog, MoneyEdit, add_row, export_csv, make_table,
-    msg_error, msg_info, msg_warn, msg_ask, selected_id,
+    DateEdit,
+    FormDialog,
+    MoneyEdit,
+    add_row,
+    export_csv,
+    make_table,
+    msg_error,
+    msg_info,
+    msg_warn,
+    msg_ask,
+    selected_id,
 )
 
 
@@ -52,12 +68,16 @@ class CustomersTab(QWidget):
             b = QPushButton(text)
             b.clicked.connect(slot)
             if style == "primary":
-                b.setStyleSheet("QPushButton{background:#1f5f8b;color:#fff;padding:7px 14px;border-radius:6px;font-weight:bold}")
+                b.setStyleSheet(
+                    "QPushButton{background:#1f5f8b;color:#fff;padding:7px 14px;border-radius:6px;font-weight:bold}"
+                )
             btns.addWidget(b)
         btns.addStretch(1)
         lay.addLayout(btns)
 
-        self.table = make_table(["شناسه", "کد", "نام", "نوع", "تلفن", "سقف اعتبار", "مانده (ریال)"])
+        self.table = make_table(
+            ["شناسه", "کد", "نام", "نوع", "تلفن", "ایمیل", "سقف اعتبار", "مانده (ریال)"]
+        )
         lay.addWidget(self.table)
 
         self.summary = QLabel("")
@@ -69,34 +89,61 @@ class CustomersTab(QWidget):
     # ------------------------------------------------------------------
     def refresh(self):
         kind = self.kind_combo.currentData() or "all"
-        rows = repo.list_parties(self.con, None if kind == "all" else kind,
-                                 utils.normalize(self.search.text()))
+        rows = repo.list_parties(
+            self.con,
+            None if kind == "all" else kind,
+            utils.normalize(self.search.text()),
+        )
         self.table.setRowCount(0)
         total = 0
         for r in rows:
-            kind_label = {"customer": "مشتری", "supplier": "تامین‌کننده", "both": "هر دو"}.get(r["kind"], r["kind"])
-            add_row(self.table, [
-                r["id"], r["code"] or "", r["name"], kind_label, r["phone"] or "",
-                utils.fmt(r["credit_limit"]), utils.fmt(r["balance"]),
-            ], data=r["id"])
+            kind_label = {
+                "customer": "مشتری",
+                "supplier": "تامین‌کننده",
+                "both": "هر دو",
+            }.get(r["kind"], r["kind"])
+            add_row(
+                self.table,
+                [
+                    r["id"],
+                    r["code"] or "",
+                    r["name"],
+                    kind_label,
+                    r["phone"] or "",
+                    r["email"] or "",
+                    utils.fmt(r["credit_limit"]),
+                    utils.fmt(r["balance"]),
+                ],
+                data=r["id"],
+            )
             total += r["balance"]
         kind_label = self.kind_combo.currentText()
-        self.summary.setText(f"تعداد: {len(rows)}  |  مجموع مانده ({kind_label}): {utils.fmt(total)} ریال")
+        self.summary.setText(
+            f"تعداد: {len(rows)}  |  مجموع مانده ({kind_label}): {utils.fmt(total)} ریال"
+        )
 
     # ------------------------------------------------------------------
     def _dialog(self, party=None):
         d = FormDialog(
-            self, "مشتری / تامین‌کننده",
-            [("name", "نام *", "text"),
-             ("code", "کد", "text"),
-             ("phone", "تلفن", "text"),
-             ("address", "آدرس", "text"),
-             ("national_id", "شناسه ملی / کد ملی", "text"),
-             ("economic_code", "کد اقتصادی", "text"),
-             ("postal_code", "کد پستی", "text"),
-             ("credit_limit", "سقف اعتبار (ریال)", "money")] +
-            ([("opening_balance", "ماندهٔ اولیه (ریال)", "money")] if not party else []) +
-            [("note", "توضیحات", "text")],
+            self,
+            "مشتری / تامین‌کننده",
+            [
+                ("name", "نام *", "text"),
+                ("code", "کد", "text"),
+                ("phone", "تلفن", "text"),
+                ("email", "ایمیل (برای اتصال فروشگاه)", "text"),
+                ("address", "آدرس", "text"),
+                ("national_id", "شناسه ملی / کد ملی", "text"),
+                ("economic_code", "کد اقتصادی", "text"),
+                ("postal_code", "کد پستی", "text"),
+                ("credit_limit", "سقف اعتبار (ریال)", "money"),
+            ]
+            + (
+                [("opening_balance", "ماندهٔ اولیه (ریال)", "money")]
+                if not party
+                else []
+            )
+            + [("note", "توضیحات", "text")],
             party,
         )
         kind_combo = QComboBox()
@@ -114,9 +161,21 @@ class CustomersTab(QWidget):
         d, kind_combo = self._dialog()
         if d.exec():
             try:
-                data = {k: d.get(k) for k in
-                        ("name", "code", "phone", "address", "national_id",
-                         "economic_code", "postal_code", "credit_limit", "note")}
+                data = {
+                    k: d.get(k)
+                    for k in (
+                        "name",
+                        "code",
+                        "phone",
+                        "email",
+                        "address",
+                        "national_id",
+                        "economic_code",
+                        "postal_code",
+                        "credit_limit",
+                        "note",
+                    )
+                }
                 data["kind"] = kind_combo.currentData()
                 if not data["name"]:
                     msg_warn(self, "وارد کردن نام الزامی است")
@@ -137,9 +196,21 @@ class CustomersTab(QWidget):
         d, kind_combo = self._dialog(dict(party))
         if d.exec():
             try:
-                data = {k: d.get(k) for k in
-                        ("name", "code", "phone", "address", "national_id",
-                         "economic_code", "postal_code", "credit_limit", "note")}
+                data = {
+                    k: d.get(k)
+                    for k in (
+                        "name",
+                        "code",
+                        "phone",
+                        "email",
+                        "address",
+                        "national_id",
+                        "economic_code",
+                        "postal_code",
+                        "credit_limit",
+                        "note",
+                    )
+                }
                 data["kind"] = kind_combo.currentData()
                 repo.save_party(self.con, pid, data)
                 self.refresh()
@@ -173,13 +244,26 @@ class CustomersTab(QWidget):
         d.setLayoutDirection(Qt.RightToLeft)
         d.resize(780, 460)
         lay = QVBoxLayout(d)
-        t = make_table(["تاریخ", "شماره سند", "نوع", "مرجع", "حساب", "بدهکار", "بستانکار", "شرح"])
+        t = make_table(
+            ["تاریخ", "شماره سند", "نوع", "مرجع", "حساب", "بدهکار", "بستانکار", "شرح"]
+        )
         bal = 0
         for r in rows:
             bal += r["debit"] - r["credit"]
-            add_row(t, [r["jalali_date"], r["no"], r["entry_type"], r["reference_no"] or "",
-                        r["account_name"], utils.fmt(r["debit"]), utils.fmt(r["credit"]),
-                        (r["entry_desc"] or "")], data=r["entry_id"])
+            add_row(
+                t,
+                [
+                    r["jalali_date"],
+                    r["no"],
+                    r["entry_type"],
+                    r["reference_no"] or "",
+                    r["account_name"],
+                    utils.fmt(r["debit"]),
+                    utils.fmt(r["credit"]),
+                    (r["entry_desc"] or ""),
+                ],
+                data=r["entry_id"],
+            )
         lay.addWidget(t)
         lay.addWidget(QLabel(f"ماندهٔ نهایی: {utils.fmt(bal)} ریال"))
         bb = QDialogButtonBox(QDialogButtonBox.Close)

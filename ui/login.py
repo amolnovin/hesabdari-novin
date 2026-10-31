@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 )
 
 import auth
+import business_profiles
+import db
 
 
 class LoginDialog(QDialog):
@@ -66,26 +68,38 @@ class FirstRunDialog(QDialog):
         self.con = con
         self.user = None
         self.setLayoutDirection(Qt.RightToLeft)
-        self.setWindowTitle("خوش آمدید — ساخت مدیر سیستم")
+        self.setWindowTitle("راه‌اندازی حسابداری نوین")
         self.setModal(True)
-        self.resize(400, 280)
+        self.resize(520, 470)
 
         lay = QVBoxLayout(self)
         lay.addWidget(QLabel(
-            "برای امنیت اطلاعات مالی، برنامه دارای کاربر و رمز عبور است.\n"
-            "لطفاً یک مدیر سیستم ایجاد کنید."))
+            "ابتدا نوع فعالیت را انتخاب کنید تا پیش‌فرض‌ها و امکانات مناسب تنظیم شود؛ "
+            "این انتخاب را بعداً هم می‌توانید تغییر دهید. سپس مدیر سیستم را بسازید."))
         form = QFormLayout()
+        self.profile = QComboBox()
+        for key, title, description in business_profiles.list_profiles():
+            self.profile.addItem(title, key)
+            self.profile.setItemData(self.profile.count() - 1, description, Qt.ToolTipRole)
+        self.profile_desc = QLabel("")
+        self.profile_desc.setWordWrap(True)
+        self.profile.currentIndexChanged.connect(self._show_profile)
+        self.company_name = QLineEdit("کسب‌وکار من")
         self.full_name = QLineEdit()
         self.username = QLineEdit("admin")
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
         self.password2 = QLineEdit()
         self.password2.setEchoMode(QLineEdit.Password)
-        form.addRow("نام و نام خانوادگی:", self.full_name)
+        form.addRow("نوع کسب‌وکار:", self.profile)
+        form.addRow("", self.profile_desc)
+        form.addRow("نام شرکت/فروشگاه:", self.company_name)
+        form.addRow("نام و نام خانوادگی مدیر:", self.full_name)
         form.addRow("نام کاربری:", self.username)
         form.addRow("رمز عبور:", self.password)
         form.addRow("تکرار رمز عبور:", self.password2)
         lay.addLayout(form)
+        self._show_profile()
 
         self.error = QLabel("")
         self.error.setStyleSheet("color:#b3261e")
@@ -98,13 +112,21 @@ class FirstRunDialog(QDialog):
         buttons.rejected.connect(self.reject)
         lay.addWidget(buttons)
 
+    def _show_profile(self, *_):
+        p = business_profiles.get_profile(self.profile.currentData())
+        self.profile_desc.setText(p["description"] + "\n" + p["note"] +
+            "\nنرخ مالیات با انتخاب نوع کسب‌وکار تغییر نمی‌کند؛ آن را جداگانه و بر اساس قانون جاری تنظیم کنید.")
+
     def create(self):
         if self.password.text() != self.password2.text():
             self.error.setText("رمز عبور و تکرار آن یکسان نیست")
             return
         try:
-            uid = auth.create_user(self.con, self.username.text(), self.password.text(),
-                                   "admin", self.full_name.text())
+            business_profiles.apply_profile(self.con, self.profile.currentData(), overwrite=True)
+            db.set_setting(self.con, "company_name", self.company_name.text().strip() or "کسب‌وکار من",
+                           require_permission=False)
+            auth.create_user(self.con, self.username.text(), self.password.text(),
+                             "admin", self.full_name.text(), bootstrap=True)
         except Exception as e:
             self.error.setText(str(e))
             return
