@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
+from html import escape
+
 import jalali
 import repo
 import utils
@@ -456,23 +458,23 @@ class InvoicesTab(QWidget):
         company = {r["key"]: r["value"] for r in self.con.execute("SELECT key, value FROM settings")}
         rows = ""
         for i, l in enumerate(lines, 1):
-            nm = l["item_name"] or l["description"] or ""
+            nm = escape(l["item_name"] or l["description"] or "")
             rows += (f"<tr><td>{i}</td><td>{nm}</td>"
-                     f"<td>{utils.fmt_qty(l['qty'])} {l['unit'] or ''}</td>"
+                     f"<td>{utils.fmt_qty(l['qty'])} {escape(l['unit'] or '')}</td>"
                      f"<td>{utils.fmt(l['unit_price'])}</td><td>{utils.fmt(l['discount'])}</td>"
                      f"<td>{utils.fmt(l['line_total'])}</td></tr>")
         return f"""
         <html><body dir="rtl" style="font-family:Tahoma;font-size:12px">
-        <h2 style="text-align:center;margin:0">{company.get('company_name','')}</h2>
+        <h2 style="text-align:center;margin:0">{escape(company.get('company_name',''))}</h2>
         <h3 style="text-align:center;margin:4px 0">{repo.KIND_LABEL[inv['kind']]} شماره {inv['no']}</h3>
         <p style="text-align:center;color:#666;margin:2px">تاریخ: {inv['jalali_date']}</p>
         <hr>
         <table width="100%" style="font-size:12px">
-          <tr><td><b>طرف حساب:</b> {inv['party_name']}</td>
-              <td><b>تلفن:</b> {inv['phone'] or '-'}</td></tr>
-          <tr><td><b>شناسه ملی / کد ملی:</b> {inv['national_id'] or '-'}</td>
-              <td><b>کد اقتصادی:</b> {inv['economic_code'] or '-'}</td></tr>
-          <tr><td colspan="2"><b>آدرس:</b> {inv['address'] or '-'} — کد پستی: {inv['postal_code'] or '-'}</td></tr>
+          <tr><td><b>طرف حساب:</b> {escape(inv['party_name'])}</td>
+              <td><b>تلفن:</b> {escape(inv['phone'] or '-')}</td></tr>
+          <tr><td><b>شناسه ملی / کد ملی:</b> {escape(inv['national_id'] or '-')}</td>
+              <td><b>کد اقتصادی:</b> {escape(inv['economic_code'] or '-')}</td></tr>
+          <tr><td colspan="2"><b>آدرس:</b> {escape(inv['address'] or '-')} — کد پستی: {escape(inv['postal_code'] or '-')}</td></tr>
         </table>
         <hr>
         <table width="100%" border="1" cellspacing="0" cellpadding="5"
@@ -489,7 +491,7 @@ class InvoicesTab(QWidget):
           <tr><td>قابل پرداخت:</td><td><b>{utils.fmt(inv['total'])}</b> ریال</td></tr>
         </table>
         <hr>
-        <p style="text-align:center;color:#666;font-size:11px">{company.get('invoice_footer','')}</p>
+        <p style="text-align:center;color:#666;font-size:11px">{escape(company.get('invoice_footer',''))}</p>
         </body></html>"""
 
     def print_invoice(self):

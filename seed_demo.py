@@ -4,13 +4,25 @@
 اجرا:  python seed_demo.py
 (داده‌های نمونه به پایگاه دادهٔ اصلی برنامه اضافه می‌شود)
 """
+import os
 import random
+import sys
 
+import auth
 import db
 import repo
 
 
 def main():
+    # به‌صورت پیش‌فرض دادهٔ نمونه در یک پایگاه دادهٔ جدا ساخته می‌شود،
+    # مگر اینکه کاربر صریحاً --main را بدهد یا ACC_DB_PATH تنظیم کرده باشد.
+    if "--main" not in sys.argv and not os.environ.get("ACC_DB_PATH"):
+        os.environ["ACC_DB_PATH"] = os.path.join(db.data_dir(), "demo.db")
+    with auth.service_mode():
+        return _seed()
+
+
+def _seed():
     con = db.connect()
     db.init_db(con)
 
@@ -86,7 +98,8 @@ def main():
     print(f"   • {len(cust_ids)} مشتری، {len(sup_ids)} تامین‌کننده")
     print(f"   • {len(item_ids) + 1} کالا/خدمت")
     print(f"   • {len(purchases)} فاکتور خرید و {len(sales)} فاکتور فروش")
-    print("\nاکنون برنامه را با دستور زیر اجرا کنید:\n   python main.py")
+    print(f"\nمسیر پایگاه دادهٔ نمونه: {db.db_path()}")
+    print("برای اجرای برنامه با دادهٔ نمونه، ACC_DB_PATH را به همین مسیر تنظیم کنید.")
 
 
 if __name__ == "__main__":

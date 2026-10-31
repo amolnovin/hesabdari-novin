@@ -207,12 +207,12 @@ def export_csv(parent, table: QTableWidget, default_name: str = "report") -> Non
         w = csv.writer(f)
         w.writerow(headers)
         for r in range(table.rowCount()):
-            w.writerow([table.item(r, c).text() if table.item(r, c) else ""
+            w.writerow([utils.csv_safe(table.item(r, c).text() if table.item(r, c) else "")
                         for c in range(table.columnCount())])
     msg_info(parent, f"فایل ذخیره شد:\n{path}")
 
 
-def print_html(parent, html: str, title: str = "گزارش", ask_pdf: bool = True) -> None:
+def print_html(parent, html: str, title: str = "گزارش", ask_pdf: bool = True) -> bool:
     """چاپ یا خروجی PDF از یک سند HTML (با پشتیبانی از RTL)"""
     doc = QTextDocument()
     doc.setDefaultFont(QFont("Tahoma", 9))
@@ -223,15 +223,17 @@ def print_html(parent, html: str, title: str = "گزارش", ask_pdf: bool = Tru
             parent, "ذخیره PDF",
             os.path.join(os.path.expanduser("~"), f"{title}.pdf"), "PDF (*.pdf)")
         if not path:
-            return
+            return False
         printer.setOutputFormat(QPrinter.PdfFormat)
         printer.setOutputFileName(path)
     else:
         from PySide6.QtPrintSupport import QPrintDialog
-        QPrintDialog(printer, parent).exec()
+        if QPrintDialog(printer, parent).exec() != QDialog.Accepted:
+            return False
     doc.print_(printer)
     if ask_pdf:
         msg_info(parent, f"PDF ذخیره شد:\n{path}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +340,18 @@ PERM_BUTTONS = {
     "🔒 قفل/باز کردن دوره":  "period.lock",
     "♻️ بازیابی از فایل":   "backup.restore",
     "📄 خروجی Excel/CSV":   "report.export",
+    "📄 خروجی":             "report.export",
+    "💾 ذخیره تنظیمات":     "settings.edit",
+    "📦 تهیهٔ پشتیبان":     "backup.create",
+    "➕ کاربر جدید":        "user.manage",
+    "✏️ تغییر نقش":         "user.manage",
+    "🚫 غیرفعال/فعال":      "user.manage",
+    "🔑 تغییر رمز":         "user.manage",
+    "➕ چک دریافتنی":       "cheque.create",
+    "➕ چک پرداختنی":       "cheque.create",
+    "✅ وصول / پرداخت":     "cheque.update",
+    "↩️ برگشت چک":          "cheque.update",
+    "🚫 ابطال چک":          "cheque.update",
 }
 
 
@@ -349,8 +363,10 @@ def apply_permissions(root) -> int:
     disabled = 0
     for btn in root.findChildren(QAbstractButton):
         perm = btn.property("perm") or PERM_BUTTONS.get(btn.text().strip())
-        if perm and not auth.has(perm):
-            btn.setEnabled(False)
-            btn.setToolTip(f"شما مجوز این کار را ندارید ({perm})")
-            disabled += 1
+        if perm:
+            allowed = auth.has(perm)
+            btn.setEnabled(allowed)
+            btn.setToolTip("" if allowed else f"شما مجوز این کار را ندارید ({perm})")
+            if not allowed:
+                disabled += 1
     return disabled

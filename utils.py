@@ -2,6 +2,7 @@
 """ابزارهای کمکیِ متن و عدد (نرمال‌سازی ورودی فارسی/عربی)"""
 
 from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 
 import jalali
 
@@ -33,8 +34,8 @@ def parse_money(text) -> int:
     if s in ("", "-"):
         return 0
     try:
-        return int(float(s))
-    except ValueError:
+        return int(Decimal(s).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except Exception:
         return 0
 
 
@@ -43,16 +44,16 @@ def parse_float(text) -> float:
     if s in ("", "-"):
         return 0.0
     try:
-        return float(s)
-    except ValueError:
+        return float(Decimal(s))
+    except Exception:
         return 0.0
 
 
 def fmt(num, decimals: int = 0) -> str:
     """قالب‌بندی عدد با جداکنندهٔ هزارگان (ارقام لاتین برای مرتب‌سازی بهتر)"""
     try:
-        return f"{float(num):,.{decimals}f}"
-    except (TypeError, ValueError):
+        return f"{Decimal(str(num)):,.{decimals}f}"
+    except Exception:
         return "0"
 
 
@@ -71,3 +72,11 @@ def today_g() -> str:
 def to_persian_digits(text: str) -> str:
     """برای نمایش در چاپ و گزارش‌ها"""
     return "".join(_PERSIAN_DIGITS[int(ch)] if ch.isdigit() else ch for ch in str(text))
+
+
+def csv_safe(text: str) -> str:
+    """جلوگیری از اجرای فرمول در Excel/CSV."""
+    t = str(text)
+    if t.lstrip().startswith(("=", "+", "-", "@", "\t", "\r")):
+        return "'" + t
+    return t

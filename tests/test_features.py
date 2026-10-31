@@ -19,6 +19,8 @@ import jalali      # noqa: E402
 import auth        # noqa: E402
 import repo        # noqa: E402
 
+_SERVICE = auth.service_mode(); _SERVICE.__enter__()
+
 con = db.connect()
 db.init_db(con)
 
@@ -60,23 +62,24 @@ print("ویژگی‌های جدید")
 print("=" * 70)
 
 # ---------------------------------------------------------------------------
+_SERVICE.__exit__(None,None,None)
 print("\n── ۱) کاربران، رمز عبور و سطح دسترسی ──")
-uid = auth.create_user(con, "admin", "1234", "admin", "مدیر سیستم")
+uid = auth.create_user(con, "admin", "12345678", "admin", "مدیر سیستم")
 check("ایجاد کاربر مدیر", uid > 0)
 check("تعداد کاربران = ۱", auth.count_users(con) == 1)
 
-user = auth.authenticate(con, "admin", "1234")
+user = auth.authenticate(con, "admin", "12345678")
 check("ورود با رمز صحیح", user is not None and user["role"] == "admin")
 check("ورود با رمز اشتباه رد می‌شود", auth.authenticate(con, "admin", "wrong") is None)
-check("ورود با نام کاربری اشتباه رد می‌شود", auth.authenticate(con, "nobody", "1234") is None)
+check("ورود با نام کاربری اشتباه رد می‌شود", auth.authenticate(con, "nobody", "12345678") is None)
 
 raw = con.execute("SELECT password_hash, salt FROM users WHERE id=?", (uid,)).fetchone()
-check("رمز عبور به صورت متن ساده ذخیره نشده", "1234" not in (raw["password_hash"] + raw["salt"]))
+check("رمز عبور به صورت متن ساده ذخیره نشده", "12345678" not in (raw["password_hash"] + raw["salt"]))
 check("هش و نمک تولید شده‌اند", len(raw["salt"]) == 32 and len(raw["password_hash"]) == 64,
       f"(نمک {len(raw['salt'])} کاراکتر)")
 
-op_id = auth.create_user(con, "op", "4321", "operator", "اپراتور")
-auth.set_current(auth.authenticate(con, "op", "4321"))
+op_id = auth.create_user(con, "op", "43214321", "operator", "اپراتور")
+auth.set_current(auth.authenticate(con, "op", "43214321"))
 check("اپراتور می‌تواند فاکتور ثبت کند", auth.has("invoice.create"))
 check("اپراتور نمی‌تواند فاکتور را ابطال کند", not auth.has("invoice.cancel"))
 check("اپراتور نمی‌تواند کاربران را مدیریت کند", not auth.has("user.manage"))
@@ -86,15 +89,23 @@ try:
 except PermissionError as e:
     check("require برای دسترسیِ غیرمجاز خطا می‌دهد", True, f"({e})")
 auth.set_current(None)
-check("بدون ورود = دسترسی کامل (برای اسکریپت‌ها)", auth.has("invoice.cancel"))
+check("بدون ورود دسترسی ندارد", not auth.has("invoice.cancel"))
 
 # ---------------------------------------------------------------------------
+_SERVICE = auth.service_mode(); _SERVICE.__enter__()
 print("\n── ۲) چک‌های دریافتنی ──")
 cust = repo.save_party(con, None, {"name": "مشتری چکی", "kind": "customer"})
 sup = repo.save_party(con, None, {"name": "تامین‌کننده چکی", "kind": "supplier"})
 item = repo.save_item(con, None, {"name": "کالای چکی", "unit": "عدد", "sale_price": 5_000_000,
                                   "purchase_price": 3_000_000, "vat_rate": 10,
                                   "track_stock": True})
+
+# تأمین موجودی اولیه
+pur = repo.save_invoice(con, None, {"kind": "purchase", "party_id": sup,
+                                    "gregorian_date": date.today().isoformat()},
+                        [{"item_id": item, "qty": 5, "unit_price": 3_000_000, "discount": 0, "vat_rate": 10,
+                          **{k: v for k, v in repo.calc_line(5, 3_000_000, 0, 10).items() if k in ("net", "vat")}}])
+repo.confirm_invoice(con, pur)
 
 # فروش ۲ عدد = ۱۰،۰۰۰،۰۰۰ + ۱،۰۰۰،۰۰۰ مالیات = ۱۱،۰۰۰،۰۰۰
 inv = repo.save_invoice(con, None, {"kind": "sale", "party_id": cust,
@@ -156,10 +167,10 @@ pur = repo.save_invoice(con, None, {"kind": "purchase", "party_id": sup,
                              if k in ("net", "vat")}}])
 repo.confirm_invoice(con, pur)
 debt = party_balance(sup)           # بدهیِ ما به تامین‌کننده (مثبت)
-check("بدهی به تامین‌کننده = ۳۳،۰۰۰،۰۰۰", debt == 33_000_000, f"({debt:,})")
+check("بدهی به تامین‌کننده = ۴۹،۵۰۰،۰۰۰", debt == 49_500_000, f"({debt:,})")
 
 paid_ch = repo.add_cheque(con, "paid", sup, "2001", 10_000_000, today, next_week, "بانک تجارت")
-check("ثبت چک پرداختنی: بدهی = ۲۳،۰۰۰،۰۰۰", party_balance(sup) == 23_000_000,
+check("ثبت چک پرداختنی: بدهی = ۳۹،۵۰۰،۰۰۰", party_balance(sup) == 39_500_000,
       f"({party_balance(sup):,})")
 check("ثبت چک پرداختنی: اسناد پرداختنی = ۱۰،۰۰۰،۰۰۰",
       -balance(repo.A_NOTES_PAYABLE) == 10_000_000, f"({-balance(repo.A_NOTES_PAYABLE):,})")
@@ -192,12 +203,14 @@ check("ثبت سند پس از باز شدن دوره", balance(repo.A_CASH) == 
 print("\n── ۵) سنوات بدهی (Aging) ──")
 old_cust = repo.save_party(con, None, {"name": "مشتری معوق", "kind": "customer"})
 # فاکتوری با سررسیدِ ۴۵ روز پیش (معوق)
+service_item = repo.save_item(con, None, {"name": "خدمت مشاوره", "unit": "ساعت", "sale_price": 5_000_000,
+                                          "vat_rate": 10, "track_stock": False})
 old_inv = repo.save_invoice(
     con, None,
     {"kind": "sale", "party_id": old_cust,
      "gregorian_date": (date.today() - timedelta(days=75)).isoformat(),
      "gregorian_due_date": (date.today() - timedelta(days=45)).isoformat()},
-    [{"item_id": item, "qty": 1, "unit_price": 5_000_000, "discount": 0, "vat_rate": 10,
+    [{"item_id": service_item, "qty": 1, "unit_price": 5_000_000, "discount": 0, "vat_rate": 10,
       **{k: v for k, v in repo.calc_line(1, 5_000_000, 0, 10).items()
          if k in ("net", "vat")}}])
 repo.confirm_invoice(con, old_inv)
@@ -225,7 +238,7 @@ check("غیرفعال‌سازی پشتیبان خودکار", db.auto_backup(co
 # ---------------------------------------------------------------------------
 print("\n── ۷) خلاصهٔ چک‌ها برای داشبورد ──")
 repo.add_cheque(con, "received", cust, "1004", 2_000_000, today, next_week)   # در جریان وصول
-repo.add_cheque(con, "paid", sup, "2002", 3_000_000, today,
+repo.add_cheque(con, "paid", sup, "2002", 3_000_000, (date.today() - timedelta(days=10)).isoformat(),
                 (date.today() - timedelta(days=3)).isoformat())               # سررسید گذشته
 summ = repo.cheques_summary(con)
 check("چکِ سررسید گذشته شناسایی شد", summ["overdue"] >= 1, f"({summ['overdue']} مورد)")

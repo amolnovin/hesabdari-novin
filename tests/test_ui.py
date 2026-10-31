@@ -19,6 +19,7 @@ import auth                                    # noqa: E402
 import db                                      # noqa: E402
 import repo                                    # noqa: E402
 import utils                                   # noqa: E402
+_SERVICE = auth.service_mode(); _SERVICE.__enter__()
 from ui.main_window import MainWindow          # noqa: E402
 from ui.invoices import InvoiceDialog          # noqa: E402
 
@@ -80,8 +81,8 @@ print("=" * 66)
 
 # کاربر برای تست دسترسی‌ها (اپراتور = دسترسی محدود)
 if auth.count_users(con) == 0:
-    auth.create_user(con, "admin", "1234", "admin", "مدیر تست")
-auth.set_current(auth.authenticate(con, "admin", "1234"))
+    auth.create_user(con, "admin", "12345678", "admin", "مدیر تست")
+auth.set_current(auth.authenticate(con, "admin", "12345678"))
 
 w = MainWindow(con)
 w.show()
@@ -137,12 +138,14 @@ step("گردش کاملِ چک‌ها", cheque_flow)
 
 def permissions():
     """دکمه‌های غیرمجاز برای کاربرِ محدود غیرفعال می‌شوند"""
+    global _SERVICE
+    _SERVICE.__exit__(None,None,None)
     from ui.widgets import apply_permissions
-    auth.set_current(auth.authenticate(con, "admin", "1234"))
+    auth.set_current(auth.authenticate(con, "admin", "12345678"))
     before = apply_permissions(w.tab_invoices)
     assert before == 0, "مدیر نباید محدود شود"
-    auth.create_user(con, "viewer1", "1234", "viewer", "مشاهده‌گر")
-    auth.set_current(auth.authenticate(con, "viewer1", "1234"))
+    auth.create_user(con, "viewer1", "12345678", "viewer", "مشاهده‌گر")
+    auth.set_current(auth.authenticate(con, "viewer1", "12345678"))
     after = apply_permissions(w.tab_invoices)
     assert after > 0, "دکمه‌های غیرمجاز غیرفعال نشدند"
     try:
@@ -150,8 +153,9 @@ def permissions():
         raise AssertionError("مشاهده‌گر نباید بتواند فاکتور را ابطال کند")
     except PermissionError:
         pass
-    auth.set_current(auth.authenticate(con, "admin", "1234"))
+    auth.set_current(auth.authenticate(con, "admin", "12345678"))
     apply_permissions(w.tab_invoices)
+    _SERVICE = auth.service_mode(); _SERVICE.__enter__()
 
 
 step("اعمال سطح دسترسی", permissions)
@@ -194,28 +198,30 @@ step("دیالوگ مشاهدهٔ فاکتور موجود", open_existing_invoic
 def login_flow():
     """تست دیالوگِ اولین اجرا و ورود"""
     from ui.login import FirstRunDialog, LoginDialog
-    con.execute("DELETE FROM users")
-    con.commit()
-    assert auth.count_users(con) == 0
-    d = FirstRunDialog(con, w)
+    import tempfile
+    con2 = db.connect(os.path.join(tempfile.mkdtemp(), "login.db"))
+    db.init_db(con2)
+    assert auth.count_users(con2) == 0
+    d = FirstRunDialog(con2, w)
     d.full_name.setText("مدیر آزمایشی")
     d.username.setText("boss")
-    d.password.setText("1234")
-    d.password2.setText("1234")
+    d.password.setText("12345678")
+    d.password2.setText("12345678")
     d.create()          # فراخوانیِ مستقیمِ منطقِ دکمه (مانند کلیک کاربر)
-    assert auth.count_users(con) == 1, "کاربرِ مدیر ساخته نشد"
+    assert auth.count_users(con2) == 1, "کاربرِ مدیر ساخته نشد"
     assert d.result() == d.DialogCode.Accepted, "دیالوگ تأیید نشد"
     assert d.user and d.user["role"] == "admin"
 
-    login = LoginDialog(con, w)
+    login = LoginDialog(con2, w)
     login.username.setText("boss")
     login.password.setText("wrong")
     login.try_login()
     assert login.user is None, "رمز اشتباه پذیرفته شد!"
-    login.password.setText("1234")
+    login.password.setText("12345678")
     login.try_login()
     assert login.user is not None, "ورود با رمز صحیح انجام نشد"
     auth.set_current(login.user)
+    con2.close()
 
 
 step("جریانِ ساخت مدیر و ورود", login_flow)
@@ -233,7 +239,7 @@ def shot(name, widget):
 
 for i, name in enumerate(["1-dashboard", "2-customers", "3-products", "4-invoices",
                           "5-payments", "6-cheques", "7-reports", "8-settings"]):
-    w.tabs.setCurrentIndex(i)
+    w.open_tab(i)
     app.processEvents()
     shot(name + ".png", w)
 

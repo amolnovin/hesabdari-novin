@@ -130,6 +130,9 @@ class SettingsTab(QWidget):
         b_chart = QPushButton("🔄 بروزرسانی کدینگ")
         b_chart.clicked.connect(self.load_accounts)
         lay.addWidget(b_chart)
+        b_audit = QPushButton("🕘 گزارش رویدادها (Audit)")
+        b_audit.clicked.connect(self.show_audit)
+        lay.addWidget(b_audit)
 
         self.load_accounts()
 
@@ -154,6 +157,12 @@ class SettingsTab(QWidget):
         apply_permissions(self)
 
     def save(self):
+        try:
+            self._save_settings()
+        except Exception as e:
+            msg_error(self, str(e))
+
+    def _save_settings(self):
         s = lambda w: utils.normalize(w.text())
         db.set_setting(self.con, "company_name", s(self.f_company))
         db.set_setting(self.con, "company_national_id", s(self.f_national))
@@ -240,13 +249,31 @@ class SettingsTab(QWidget):
         if not path:
             return
         try:
-            self.con.close()
-            shutil.copy2(path, db.db_path())
-            msg_info(self, "بازیابی انجام شد. لطفاً برنامه را دوباره اجرا کنید.")
-            QMessageBox.information(self, "پایان", "برنامه بسته می‌شود.")
-            sys.exit(0)
+            info = db.stage_restore(self.con, path)
+            counts = info["counts"]
+            msg_info(self, "فایل پشتیبان معتبر است و برای بازیابی آماده شد.\n"
+                           f"شامل {counts['invoices']} فاکتور، {counts['payments']} دریافت/پرداخت و {counts['journal_entries']} سند.\n"
+                           "برنامه بسته می‌شود؛ در اجرای بعدی بازیابی اعمال خواهد شد.")
+            QApplication = __import__("PySide6.QtWidgets", fromlist=["QApplication"]).QApplication
+            QApplication.instance().quit()
         except Exception as e:
             msg_error(self, str(e))
+
+    def show_audit(self):
+        d = QDialog(self)
+        d.setWindowTitle("گزارش رویدادها")
+        d.setLayoutDirection(Qt.RightToLeft)
+        d.resize(900, 520)
+        lay = QVBoxLayout(d)
+        t = make_table(["زمان", "کاربر", "نقش", "عملیات", "جدول", "شناسه", "شرح"])
+        for r in self.con.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 1000"):
+            add_row(t, [r["created_at"], r["username"] or "سیستم", r["role"] or "", r["action"],
+                        r["table_name"], r["record_id"], r["detail"]])
+        lay.addWidget(t)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        bb.rejected.connect(d.reject)
+        lay.addWidget(bb)
+        d.exec()
 
     def open_folder(self):
         path = db.data_dir()
@@ -279,8 +306,8 @@ class UsersDialog(QDialog):
         btns = QHBoxLayout()
         for text, slot in [("➕ کاربر جدید", self.add_user),
                            ("🔑 تغییر رمز", self.reset_password),
-                           ("🔁 تغییر نقش", self.change_role),
-                           ("🚫 فعال/غیرفعال", self.toggle_active),
+                           ("✏️ تغییر نقش", self.change_role),
+                           ("🚫 غیرفعال/فعال", self.toggle_active),
                            ("🔄 بروزرسانی", self.refresh)]:
             b = QPushButton(text)
             b.clicked.connect(slot)
@@ -318,14 +345,14 @@ class UsersDialog(QDialog):
         d = FormDialog(self, "کاربر جدید",
                        [("username", "نام کاربری *", "text"),
                         ("full_name", "نام و نام خانوادگی", "text"),
-                        ("password", "رمز عبور (حداقل ۴ کاراکتر) *", "text")])
+                        ("password", "رمز عبور (حداقل ۸ کاراکتر) *", "text")])
         role = QComboBox()
         for k, label in auth.ROLES.items():
             role.addItem(label, k)
         d.layout().itemAt(0).layout().insertRow(3, "نقش", role)
         if d.exec():
-            if len(d.get("password")) < 4:
-                msg_warn(self, "رمز عبور باید حداقل ۴ کاراکتر باشد")
+            if len(d.get("password")) < 8:
+                msg_warn(self, "رمز عبور باید حداقل ۸ کاراکتر باشد")
                 return
             try:
                 auth.create_user(self.con, d.get("username"), d.get("password"),
@@ -339,7 +366,7 @@ class UsersDialog(QDialog):
         uid = self._selected()
         if not uid:
             return
-        pwd, ok = QInputDialog.getText(self, "رمز عبور جدید", "رمز عبور (حداقل ۴ کاراکتر):",
+        pwd, ok = QInputDialog.getText(self, "رمز عبور جدید", "رمز عبور (حداقل ۸ کاراکتر):",
                                        QLineEdit.Password)
         if ok and pwd:
             try:

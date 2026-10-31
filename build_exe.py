@@ -20,6 +20,7 @@ APP_NAME = "Hesabdar"
 HIDDEN = [
     "PySide6.QtPrintSupport",
     "PySide6.QtWidgets",
+    "PySide6.QtSvg",
     "schema_embedded",
 ]
 
@@ -83,9 +84,10 @@ def main():
         print("❌ فایل main.py در این پوشه یافت نشد")
         sys.exit(1)
 
-    embed_schema()
+    if not dry_run:
+        embed_schema()
     if dry_run:
-        print("\n[حالت آزمایشی] نصب بسته‌ها نادیده گرفته شد.")
+        print("\n[حالت آزمایشی] نصب بسته‌ها و جاسازی schema نادیده گرفته شد.")
     else:
         ensure_module("PySide6", "PySide6")
         ensure_module("pyinstaller", "PyInstaller")
@@ -95,6 +97,7 @@ def main():
         "--noconfirm", "--clean",
         "--name", APP_NAME,
         "--add-data", os.path.join(HERE, "schema.sql") + os.pathsep + ".",
+        "--add-data", os.path.join(HERE, "assets") + os.pathsep + "assets",
     ]
     for h in HIDDEN:
         cmd += ["--hidden-import", h]
