@@ -1,20 +1,29 @@
 # -*- coding: utf-8 -*-
 """برگهٔ دریافت و پرداخت"""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
-)
-
 from html import escape
+
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 import jalali
 import repo
-import utils
 from ui.widgets import (
-    DateEdit, FormDialog, MoneyEdit, add_row, export_csv, make_table,
-    msg_error, msg_info, msg_warn, msg_ask, selected_id,
+    FormDialog,
+    add_row,
+    export_csv,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    selected_id,
 )
 
 METHOD_LABEL = {"cash": "نقد (صندوق)", "bank": "بانک", "pos": "کارتخوان", "transfer": "انتقال"}
@@ -24,7 +33,14 @@ class PaymentsTab(QWidget):
     def __init__(self, con, parent=None):
         super().__init__(parent)
         self.con = con
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        if hasattr(self, "refresh"):
+            self.refresh()
 
     def _build(self):
         lay = QVBoxLayout(self)
@@ -47,7 +63,7 @@ class PaymentsTab(QWidget):
         lay.addLayout(btns)
 
         self.table = make_table(
-            ["شناسه", "شماره", "تاریخ", "نوع", "طرف حساب", "روش", "مبلغ (ریال)",
+            ["شناسه", "شماره", "تاریخ", "نوع", "طرف حساب", "روش", f"مبلغ ({self._unit})",
              "فاکتور مرتبط", "شرح", "وضعیت"])
         lay.addWidget(self.table)
 
@@ -73,18 +89,18 @@ class PaymentsTab(QWidget):
                 r["id"], r["no"], r["jalali_date"],
                 "دریافت" if is_receipt else "پرداخت",
                 r["party_name"], METHOD_LABEL.get(r["method"], r["method"]),
-                utils.fmt(r["amount"]),
+                repo.fmt_money(self.con, r["amount"]),
                 f"#{r['invoice_id']}" if r["invoice_id"] else "",
                 r["description"] or "", status,
             ], data=r["id"])
         self.summary.setText(
-            f"تعداد: {len(rows)}  |  مجموع دریافت‌ها: {utils.fmt(rec)} ریال  |  "
-            f"مجموع پرداخت‌ها: {utils.fmt(pay)} ریال  |  خالص نقد: {utils.fmt(rec - pay)} ریال")
+            f"تعداد: {len(rows)}  |  مجموع دریافت‌ها: {repo.fmt_money(self.con, rec)} {self._unit}  |  "
+            f"مجموع پرداخت‌ها: {repo.fmt_money(self.con, pay)} {self._unit}  |  خالص نقد: {repo.fmt_money(self.con, rec - pay)} {self._unit}")
 
     # ------------------------------------------------------------------
     def _dialog(self, direction: str, title: str) -> FormDialog:
         d = FormDialog(self, title, [
-            ("amount", "مبلغ (ریال) *", "money"),
+            ("amount", f"مبلغ ({self._unit}) *", "money"),
             ("date", "تاریخ", "date"),
             ("description", "شرح", "text"),
         ])
@@ -115,7 +131,7 @@ class PaymentsTab(QWidget):
             for inv in repo.list_invoices(self.con, inv_kind, party_id=pid, status="confirmed"):
                 rem = inv["total"] - inv["paid_amount"]
                 if rem > 0:
-                    invoice.addItem(f"فاکتور #{inv['no']} — مانده {utils.fmt(rem)} ریال", inv["id"])
+                    invoice.addItem(f"فاکتور #{inv['no']} — مانده {repo.fmt_money(self.con, rem)} {self._unit}", inv["id"])
         party.currentIndexChanged.connect(reload_invoices)
         reload_invoices()
         return d
@@ -174,7 +190,7 @@ class PaymentsTab(QWidget):
         <hr>
         <p>تاریخ: {p['jalali_date']}</p>
         <p>{'دریافت از:' if p['direction']=='receipt' else 'پرداخت به:'} <b>{escape(p['party_name'])}</b></p>
-        <p>مبلغ: <b>{utils.fmt(p['amount'])} ریال</b></p>
+        <p>مبلغ: <b>{repo.fmt_money(self.con, p['amount'])} {self._unit}</b></p>
         <p>روش: {METHOD_LABEL.get(p['method'], p['method'])}</p>
         <p>شرح: {escape(p['description'] or '-')}</p>
         {'<p style="color:#b3261e"><b>این رسید ابطال شده است</b></p>' if p['is_cancelled'] else ''}

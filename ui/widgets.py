@@ -3,16 +3,30 @@
 
 import csv
 import os
-from datetime import date, datetime
+from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
-    QAbstractButton, QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
-    QTextEdit, QVBoxLayout, QWidget,
+    QAbstractButton,
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 import auth
@@ -81,7 +95,7 @@ class DateEdit(QWidget):
         try:
             return jalali.from_jalali_str(self.jalali)
         except ValueError as e:
-            raise ValueError(str(e))
+            raise ValueError(str(e)) from e
 
     def is_valid(self) -> bool:
         try:
@@ -105,14 +119,14 @@ class MoneyEdit(QLineEdit):
         self.set_value(value)
 
     def _reformat(self):
-        raw = utils.normalize(self.text()).replace(",", "")
+        # بدون مسیر float: ارقام بزرگ (بیش از 2^53) و ورودی اعشاری باید دقیق بمانند
+        raw = utils.normalize(self.text()).replace(",", "").replace("٬", "").replace(" ", "")
         if not raw or raw in ("-",):
             return
-        pos = self.cursorPosition()
-        try:
-            val = int(float(raw))
-        except ValueError:
+        val = utils.parse_money(raw)
+        if val == 0 and raw not in ("0", "-0"):
             return
+        pos = self.cursorPosition()
         self.blockSignals(True)
         self.setText(utils.fmt(val))
         self.setCursorPosition(min(len(self.text()), pos + max(0, len(self.text()) - len(raw))))
@@ -286,8 +300,8 @@ class StatCard(QFrame):
     def __init__(self, title: str, value: str = "—", color: str = "#1f5f8b", hint: str = ""):
         super().__init__()
         self.setStyleSheet(
-            f"QFrame{{background:#ffffff;border:1px solid #e2e6ec;border-radius:10px;}}"
-            f"QLabel{{border:none;background:transparent;}}"
+            "QFrame{background:#ffffff;border:1px solid #e2e6ec;border-radius:10px;}"
+            "QLabel{border:none;background:transparent;}"
         )
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setMinimumHeight(96)

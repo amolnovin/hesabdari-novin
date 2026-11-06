@@ -13,10 +13,10 @@ TMP = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["ACC_DB_PATH"] = TMP
 os.environ["ACC_DATA_DIR"] = os.path.dirname(TMP)
 
-import db          # noqa: E402
-import jalali      # noqa: E402
-import repo        # noqa: E402
-import auth        # noqa: E402
+import auth  # noqa: E402
+import db  # noqa: E402
+import jalali  # noqa: E402
+import repo  # noqa: E402
 
 _SERVICE = auth.service_mode(); _SERVICE.__enter__()
 
@@ -166,7 +166,7 @@ except repo.AccountingError as e:
 try:
     repo.delete_party(con, cust)
     check("رد حذف مشتریِ دارای سند", False)
-except repo.AccountingError as e:
+except repo.AccountingError:
     check("رد حذف مشتریِ دارای سند", True)
 
 # --- ۱۱) ابطال فاکتور فروش ---------------------------------------------------
@@ -203,4 +203,6 @@ check("تاریخ شمسی فاکتورها", con.execute(
 print("\n" + "=" * 70)
 print(f"نتیجه: {passed} موفق / {failed} ناموفق")
 print("=" * 70)
-sys.exit(1 if failed else 0)
+
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

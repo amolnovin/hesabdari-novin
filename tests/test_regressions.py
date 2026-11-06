@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """رگرسیون‌های گزارش بررسی کد و الزامات فایل پیوست."""
+import pathlib
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -159,6 +161,7 @@ def test_money_decimal_and_csv_safe():
 
 def test_migration_legacy_db(tmp_path, monkeypatch):
     import sqlite3
+
     from migrations import migrate
     path = tmp_path / "legacy.db"
     con = sqlite3.connect(path)
@@ -187,8 +190,219 @@ def test_migration_legacy_db(tmp_path, monkeypatch):
       VALUES (1,1,'sale',1,1,'2025-04-01','1404/01/12',100,0,0,100,'draft');
     INSERT INTO stock_moves(item_id,move_date,qty,unit_cost,move_type) VALUES (1,'2025-04-01',2,50,'purchase');
     """)
-    warnings = migrate(con)
+    migrate(con)
     assert con.execute("PRAGMA user_version").fetchone()[0] == 2
     assert con.execute("SELECT value FROM stock_moves").fetchone()[0] == 100
     assert "cogs_amount" in {r[1] for r in con.execute("PRAGMA table_info(invoices)")}
     con.close()
+
+
+# ---------------------------------------------------------------------------
+# رگرسیون‌های اصلاحات (نسخهٔ ۲.۱)
+# ---------------------------------------------------------------------------
+def _supplier_and_customer(con):
+    sup = repo.save_party(con, None, {"name": "تامین‌کننده", "kind": "supplier"})
+    cust = repo.save_party(con, None, {"name": "مشتری", "kind": "customer"})
+    return sup, cust
+
+
+def test_sale_return_row_profit_matches_ledger(con):
+    """سود ناخالص ردیف برگشت از فروش باید با دفتر کل هم‌خوان باشد."""
+    sup, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "purchase_price": 500, "sale_price": 1000,
+                                      "track_stock": True})
+    repo.confirm_invoice(con, inv(con, "purchase", sup, [line(item, 10, 500, vat=0)]))
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 5, 1000, vat=0)]))
+    repo.confirm_invoice(con, inv(con, "sale_return", cust, [line(item, 2, 1000, vat=0)]))
+    r = repo.report_sales(con, "2000-01-01", "2100-01-01")
+    ret = [d for d in r["detail"] if d["inv"]["kind"] == "sale_return"][0]
+    # برگشت ۲ × ۱۰۰۰ با بهای ۵۰۰ ⇒ سود ۱۰۰۰− به‌ازای هر ردیف: −(۲۰۰۰) − (−۱۰۰۰) = −۱۰۰۰
+    assert ret["cogs"] == 1000
+    assert ret["gross_profit"] == -1000
+    pl = repo.report_profit_loss(con, "2000-01-01", "2100-01-01")
+    assert r["gross_profit"] == pl["gross_profit"]
+    assert r["net_sales"] == pl["revenue"] and r["cogs"] == pl["cogs"]
+
+
+def test_sale_return_valued_at_original_cost_when_stock_is_zero(con):
+    """برگشت از فروش با موجودی صفر باید بهای اصلی فروش را برگرداند، نه صفر."""
+    sup, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "purchase_price": 400, "sale_price": 900,
+                                      "track_stock": True})
+    repo.confirm_invoice(con, inv(con, "purchase", sup, [line(item, 4, 400, vat=0)]))
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 4, 900, vat=0)]))
+    assert repo.stock_state(con, item)[0] == 0
+    repo.confirm_invoice(con, inv(con, "sale_return", cust, [line(item, 2, 900, vat=0)]))
+    qty, _ = repo.stock_state(con, item)
+    assert qty == 2
+    assert repo.stock_value(con, item) == 800  # ۲ × ۴۰۰
+    assert repo.report_reconciliation(con)["stock_difference"] == 0
+
+
+def test_return_cannot_exceed_sold_quantity(con):
+    sup, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "track_stock": True, "purchase_price": 100,
+                                      "sale_price": 200})
+    repo.confirm_invoice(con, inv(con, "purchase", sup, [line(item, 10, 100, vat=0)]))
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 3, 200, vat=0)]))
+    big = inv(con, "sale_return", cust, [line(item, 5, 200, vat=0)])
+    with pytest.raises(repo.AccountingError):
+        repo.confirm_invoice(con, big)
+    ok = inv(con, "sale_return", cust, [line(item, 3, 200, vat=0)])
+    repo.confirm_invoice(con, ok)
+    with pytest.raises(repo.AccountingError):
+        repo.confirm_invoice(con, inv(con, "sale_return", cust, [line(item, 1, 200, vat=0)]))
+
+
+def test_cancel_purchase_cannot_make_negative_stock(con):
+    sup, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "track_stock": True, "purchase_price": 500,
+                                      "sale_price": 1000})
+    pur = inv(con, "purchase", sup, [line(item, 10, 500, vat=0)])
+    repo.confirm_invoice(con, pur)
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 5, 1000, vat=0)]))
+    with pytest.raises(repo.AccountingError):
+        repo.cancel_invoice(con, pur, "اشتباه")
+    assert repo.stock_state(con, item)[0] == 5
+    assert repo.report_reconciliation(con)["stock_difference"] == 0
+
+
+def test_deactivating_item_with_stock_is_rejected(con):
+    sup, _ = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "track_stock": True, "purchase_price": 500})
+    repo.confirm_invoice(con, inv(con, "purchase", sup, [line(item, 3, 500, vat=0)]))
+    with pytest.raises(repo.AccountingError):
+        repo.delete_item(con, item)
+    # بعد از صفر کردن موجودی، غیرفعال‌سازی مجاز است و مغایرت انبار/دفتر ایجاد نمی‌شود
+    repo.adjust_stock(con, item, 0, 500, date.today().isoformat(), "شمارش")
+    repo.delete_item(con, item)
+    assert repo.report_reconciliation(con)["stock_difference"] == 0
+
+
+def test_party_opening_is_recorded_and_not_silently_changed(con):
+    pid = repo.save_party(con, None, {"name": "مشتری", "kind": "customer", "opening_balance": 5_000})
+    assert repo.party_opening(con, pid) == 5_000
+    assert repo.report_customers(con)["total"] == 5_000
+    # مقدار جدید پذیرفته و سند ثبت می‌شود (نه اینکه بی‌صدا نادیده گرفته شود)
+    with pytest.raises(repo.AccountingError):
+        repo.save_party(con, pid, {"name": "مشتری", "kind": "customer", "opening_balance": 9_000})
+    # ویرایش سایر فیلدها بدون تغییر ماندهٔ اولیه باید کار کند
+    repo.save_party(con, pid, {"name": "مشتری ۲", "kind": "customer", "opening_balance": 5_000})
+    assert repo.report_customers(con)["total"] == 5_000
+
+
+def test_opening_balance_is_atomic_in_locked_period(con):
+    today = date.today().isoformat()
+    fy = db.current_fiscal_year(con, today)
+    month = int(jalali.to_jalali_str(today).split("/")[1])
+    repo.set_period_lock(con, fy["id"], month, True)
+    before = con.execute("SELECT COUNT(*) c FROM parties").fetchone()["c"]
+    with pytest.raises(repo.AccountingError):
+        repo.save_party(con, None, {"name": "قفل", "kind": "customer", "opening_balance": 1_000})
+    assert con.execute("SELECT COUNT(*) c FROM parties").fetchone()["c"] == before
+
+
+def test_duplicate_item_code_raises_readable_error(con):
+    a = repo.save_item(con, None, {"name": "الف", "code": "K1"})
+    assert a
+    with pytest.raises(repo.AccountingError):
+        repo.save_item(con, None, {"name": "ب", "code": "K1"})
+
+
+def test_overpayment_without_invoice_is_rejected(con):
+    _, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "track_stock": False, "sale_price": 1000})
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 1, 1000, vat=0)]))
+    with pytest.raises(repo.AccountingError):
+        repo.add_payment(con, "receipt", cust, 5_000, date.today().isoformat(), "cash")
+    pay = repo.add_payment(con, "receipt", cust, 1_000, date.today().isoformat(), "cash")
+    assert pay
+
+
+def test_inactive_party_balance_still_reported(con):
+    _, cust = _supplier_and_customer(con)
+    item = repo.save_item(con, None, {"name": "کالا", "track_stock": False, "sale_price": 1000})
+    repo.confirm_invoice(con, inv(con, "sale", cust, [line(item, 2, 1000, vat=0)]))
+    assert repo.report_customers(con)["total"] == 2_000
+    # غیرفعال‌سازی مستقیم (delete_party برای شخصِ دارای سند خطا می‌دهد)
+    con.execute("UPDATE parties SET is_active=0 WHERE id=?", (cust,)); con.commit()
+    # ماندهٔ باز نباید از گزارش‌ها ناپدید شود
+    assert repo.report_customers(con)["total"] == 2_000
+
+
+def test_currency_unit_is_applied_everywhere(con):
+    assert repo.unit_label(con) == "ریال"
+    assert repo.fmt_money(con, 1_234_500, with_unit=True) == "1,234,500 ریال"
+    db.set_setting(con, "money_unit", "toman")
+    assert repo.unit_label(con) == "تومان"
+    assert repo.fmt_money(con, 1_234_500, with_unit=True) == "123,450 تومان"
+    db.set_setting(con, "money_unit", "rial")
+
+
+def test_money_widget_never_uses_float(monkeypatch):
+    """مسیر تبدیل متن به مبلغ در UI باید بدون float و دقیق باشد."""
+    import utils
+    assert utils.parse_money("9007199254740993") == 9_007_199_254_740_993
+    assert utils.parse_money("1500.9") == 1501
+    src = (pathlib.Path(__file__).resolve().parent.parent / "ui" / "widgets.py").read_text(encoding="utf-8")
+    money_edit = src.split("class MoneyEdit", 1)[1].split("class NumberEdit", 1)[0]
+    assert "float(" not in money_edit
+
+
+def test_every_used_permission_is_granted_to_some_role(con):
+    """مجوزی که هیچ نقشی ندارد، باعث قفل شدنِ بی‌صدا یک قابلیت می‌شود."""
+    src = (pathlib.Path(__file__).resolve().parent.parent)
+    used = set()
+    for path in list(src.glob("*.py")) + list((src / "ui").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for marker in ('auth.require("', "require('"):
+            for chunk in text.split(marker)[1:]:
+                perm = chunk.split(chunk[0])[0]
+                if "." in perm and " " not in perm:
+                    used.add(perm)
+    granted = set()
+    for role in auth.ROLES:
+        granted |= auth.permissions_for(role)
+    assert used <= granted, f"مجوزهای بدون نقش: {sorted(used - granted)}"
+    # حسابداری باید بتواند دوره را قفل کند (قبلاً هیچ نقشی این مجوز را نداشت)
+    assert "period.lock" in auth.permissions_for("accountant")
+    assert "period.lock" not in auth.permissions_for("operator")
+
+
+def test_build_dry_run_does_not_write_files(tmp_path):
+    """build_exe.py --dry-run باید بدون نوشتن هیچ فایلی پایان یابد."""
+    import hashlib
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    target = root / "schema_embedded.py"
+    before = hashlib.md5(target.read_bytes()).hexdigest()
+    out = subprocess.run([sys.executable, "build_exe.py", "--dry-run"], cwd=root,
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert hashlib.md5(target.read_bytes()).hexdigest() == before
+    assert "فرمانِ ساخت" in out.stdout
+
+
+def test_ui_has_no_hardcoded_currency_and_tabs_refresh_unit(con):
+    """در UI نباید «ریال» ثابت مانده باشد؛ همهٔ برگه‌ها باید واحد را از تنظیمات بخوانند."""
+    import ast
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    ui = root / "ui"
+    offenders = []
+    for path in sorted(ui.glob("*.py")):
+        if path.name in ("settings.py",):  # تنها جایی که برچسب گزینهٔ تنظیمات است
+            continue
+        for no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            # «سریال» شامل «ریال» است و نباید مثبت کاذب بسازد
+            if re.search(r"(?<!س)ریال", line):
+                offenders.append(f"{path.name}:{no}: {line.strip()}")
+    assert not offenders, "متن ریال ثابت در UI: " + "; ".join(offenders)
+
+    for name in ("cheques", "customers", "invoices", "payments", "products", "reports"):
+        tree = ast.parse((ui / f"{name}.py").read_text(encoding="utf-8"))
+        methods = {n.name for cls in tree.body if isinstance(cls, ast.ClassDef)
+                   for n in cls.body if isinstance(n, ast.FunctionDef)}
+        assert "refresh_unit" in methods, f"ui/{name}.py: refresh_unit ندارد"

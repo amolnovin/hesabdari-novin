@@ -3,15 +3,29 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 import repo
 import utils
 from ui.widgets import (
-    DateEdit, FormDialog, MoneyEdit, add_row, export_csv, make_table,
-    msg_error, msg_info, msg_warn, msg_ask, selected_id,
+    FormDialog,
+    add_row,
+    export_csv,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    selected_id,
 )
 
 
@@ -20,7 +34,14 @@ class CustomersTab(QWidget):
         super().__init__(parent)
         self.con = con
         self.kind = "customer"
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        if hasattr(self, "refresh"):
+            self.refresh()
 
     # ------------------------------------------------------------------
     def _build(self):
@@ -57,7 +78,7 @@ class CustomersTab(QWidget):
         btns.addStretch(1)
         lay.addLayout(btns)
 
-        self.table = make_table(["شناسه", "کد", "نام", "نوع", "تلفن", "سقف اعتبار", "مانده (ریال)"])
+        self.table = make_table(["شناسه", "کد", "نام", "نوع", "تلفن", "سقف اعتبار", f"مانده ({self._unit})"])
         lay.addWidget(self.table)
 
         self.summary = QLabel("")
@@ -77,11 +98,11 @@ class CustomersTab(QWidget):
             kind_label = {"customer": "مشتری", "supplier": "تامین‌کننده", "both": "هر دو"}.get(r["kind"], r["kind"])
             add_row(self.table, [
                 r["id"], r["code"] or "", r["name"], kind_label, r["phone"] or "",
-                utils.fmt(r["credit_limit"]), utils.fmt(r["balance"]),
+                repo.fmt_money(self.con, r["credit_limit"]), repo.fmt_money(self.con, r["balance"]),
             ], data=r["id"])
             total += r["balance"]
         kind_label = self.kind_combo.currentText()
-        self.summary.setText(f"تعداد: {len(rows)}  |  مجموع مانده ({kind_label}): {utils.fmt(total)} ریال")
+        self.summary.setText(f"تعداد: {len(rows)}  |  مجموع مانده ({kind_label}): {repo.fmt_money(self.con, total)} {self._unit}")
 
     # ------------------------------------------------------------------
     def _dialog(self, party=None):
@@ -94,8 +115,8 @@ class CustomersTab(QWidget):
              ("national_id", "شناسه ملی / کد ملی", "text"),
              ("economic_code", "کد اقتصادی", "text"),
              ("postal_code", "کد پستی", "text"),
-             ("credit_limit", "سقف اعتبار (ریال)", "money")] +
-            ([("opening_balance", "ماندهٔ اولیه (ریال)", "money")] if not party else []) +
+             ("credit_limit", f"سقف اعتبار ({self._unit})", "money")] +
+            ([("opening_balance", f"ماندهٔ اولیه ({self._unit})", "money")] if not party else []) +
             [("note", "توضیحات", "text")],
             party,
         )
@@ -178,10 +199,10 @@ class CustomersTab(QWidget):
         for r in rows:
             bal += r["debit"] - r["credit"]
             add_row(t, [r["jalali_date"], r["no"], r["entry_type"], r["reference_no"] or "",
-                        r["account_name"], utils.fmt(r["debit"]), utils.fmt(r["credit"]),
+                        r["account_name"], repo.fmt_money(self.con, r["debit"]), repo.fmt_money(self.con, r["credit"]),
                         (r["entry_desc"] or "")], data=r["entry_id"])
         lay.addWidget(t)
-        lay.addWidget(QLabel(f"ماندهٔ نهایی: {utils.fmt(bal)} ریال"))
+        lay.addWidget(QLabel(f"ماندهٔ نهایی: {repo.fmt_money(self.con, bal)} {self._unit}"))
         bb = QDialogButtonBox(QDialogButtonBox.Close)
         bb.rejected.connect(d.reject)
         lay.addWidget(bb)

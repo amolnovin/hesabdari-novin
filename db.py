@@ -37,8 +37,8 @@ def schema_sql() -> str:
     try:
         from schema_embedded import SCHEMA_SQL
         return SCHEMA_SQL
-    except Exception:
-        raise FileNotFoundError(f"فایل schema.sql پیدا نشد:\n{path}")
+    except ImportError:
+        raise FileNotFoundError(f"فایل schema.sql پیدا نشد:\n{path}") from None
 
 
 def data_dir() -> str:

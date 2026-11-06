@@ -14,10 +14,10 @@ TMPDIR = tempfile.mkdtemp()
 os.environ["ACC_DB_PATH"] = os.path.join(TMPDIR, "features.db")
 os.environ["ACC_DATA_DIR"] = TMPDIR   # ایزوله: پشتیبان‌ها کنارِ دادهٔ واقعی نروند
 
-import db          # noqa: E402
-import jalali      # noqa: E402
-import auth        # noqa: E402
-import repo        # noqa: E402
+import auth  # noqa: E402
+import db  # noqa: E402
+import jalali  # noqa: E402
+import repo  # noqa: E402
 
 _SERVICE = auth.service_mode(); _SERVICE.__enter__()
 
@@ -226,7 +226,7 @@ check("جمع بازه‌های گزارش محاسبه شد", sum(aging["bucket
 print("\n── ۶) پشتیبان خودکار ──")
 db.set_setting(con, "auto_backup", "1")
 db.set_setting(con, "backup_keep", "3")
-for i in range(6):
+for _ in range(6):
     db.make_backup(con, "test")
 kept = [f for f in os.listdir(db.backup_dir()) if f.endswith(".db")]
 db.auto_backup(con)
@@ -249,4 +249,6 @@ check("خلاصهٔ چک‌ها شامل چک‌های در جریان است",
 print("\n" + "=" * 70)
 print(f"نتیجه: {passed} موفق / {failed} ناموفق")
 print("=" * 70)
-sys.exit(1 if failed else 0)
+
+if __name__ == "__main__":
+    sys.exit(1 if failed else 0)

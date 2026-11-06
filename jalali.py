@@ -14,7 +14,7 @@
 کتابخانهٔ jdatetime روی هزاران تاریخ تصادفی (در tests/ قابل اجراست).
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 __all__ = [
     "gregorian_to_jalali", "jalali_to_gregorian",

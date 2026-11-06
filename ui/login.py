@@ -3,8 +3,12 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QVBoxLayout,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QVBoxLayout,
 )
 
 import auth
@@ -103,8 +107,8 @@ class FirstRunDialog(QDialog):
             self.error.setText("رمز عبور و تکرار آن یکسان نیست")
             return
         try:
-            uid = auth.create_user(self.con, self.username.text(), self.password.text(),
-                                   "admin", self.full_name.text())
+            auth.create_user(self.con, self.username.text(), self.password.text(),
+                             "admin", self.full_name.text())
         except Exception as e:
             self.error.setText(str(e))
             return

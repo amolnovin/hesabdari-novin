@@ -10,7 +10,6 @@ import hashlib
 import hmac
 import os
 import sqlite3
-from contextlib import contextmanager
 from datetime import datetime
 
 import db
@@ -26,10 +25,19 @@ _PERMS = {
         "invoice.create", "invoice.confirm", "invoice.cancel", "invoice.print",
         "payment.create", "payment.cancel", "cheque.create", "cheque.update",
         "party.edit", "item.edit", "stock.adjust", "report.view", "report.export",
-        "backup.create", "settings.edit",
+        "backup.create", "settings.edit", "period.lock",
     },
     "operator": {"invoice.create", "payment.create", "cheque.create", "party.edit", "report.view"},
     "viewer": {"report.view"},
+}
+
+# همهٔ مجوزهای شناخته‌شده؛ هر مجوز تازه‌ای که در کد استفاده شود باید اینجا هم باشد
+# تا «مجوزی که هیچ نقشی ندارد» بی‌صدا ایجاد نشود.
+ALL_PERMISSIONS = {
+    "invoice.create", "invoice.confirm", "invoice.cancel", "invoice.print",
+    "payment.create", "payment.cancel", "cheque.create", "cheque.update",
+    "party.edit", "item.edit", "stock.adjust", "report.view", "report.export",
+    "backup.create", "backup.restore", "settings.edit", "period.lock", "user.manage",
 }
 
 _current_user: dict | None = None
@@ -191,6 +199,10 @@ def has(perm: str) -> bool:
 def require(perm: str) -> None:
     if not has(perm):
         raise PermissionError(f"شما مجوز «{perm}» را ندارید (نقش فعلی: {ROLES.get(current_role(), current_role())})")
+
+
+def permissions_for(role: str) -> set:
+    return {"*"} if role == "admin" else set(_PERMS.get(role, set()))
 
 
 def role_label(role: str) -> str:

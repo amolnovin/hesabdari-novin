@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 import auth
 import db
@@ -78,7 +78,13 @@ def money_unit(con) -> tuple[str, int]:
     return ("تومان", 10) if db.get_setting(con, "money_unit", "rial") == "toman" else ("ریال", 1)
 
 
+def unit_label(con) -> str:
+    """برچسب واحد پول جاری برای نمایش در جدول‌ها و فرم‌ها."""
+    return money_unit(con)[0]
+
+
 def fmt_money(con, rials: int, with_unit: bool = False) -> str:
+    """قالب‌بندی مبلغ با واحد نمایشیِ انتخاب‌شده در تنظیمات (ریال/تومان)."""
     unit, div = money_unit(con)
     val = D(rials) / D(div)
     s = f"{val:,.0f}" if val == val.to_integral_value() else f"{val:,.2f}"
@@ -164,6 +170,16 @@ def get_party(con, party_id):
     return con.execute("SELECT * FROM parties WHERE id=?", (party_id,)).fetchone()
 
 
+def party_opening(con, party_id: int) -> int:
+    """ماندهٔ اولیهٔ ثبت‌شده برای یک شخص (از روی سند قطعیِ opening)."""
+    row = con.execute("""SELECT COALESCE(SUM(CASE WHEN a.type='asset' THEN l.debit-l.credit
+                                                     ELSE l.credit-l.debit END), 0) AS v
+        FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id JOIN accounts a ON a.id=l.account_id
+        WHERE l.party_id=? AND e.entry_type='opening' AND e.status='posted' AND a.has_party=1""",
+        (party_id,)).fetchone()
+    return int(row["v"] or 0)
+
+
 def save_party(con, party_id, data) -> int:
     auth.require("party.edit")
     name = (data.get("name") or "").strip()
@@ -176,26 +192,38 @@ def save_party(con, party_id, data) -> int:
     credit = money_int(data.get("credit_limit") or 0, "سقف اعتبار")
     if credit < 0:
         raise AccountingError("سقف اعتبار نمی‌تواند منفی باشد")
-    with db.tx(con):
-        if party_id:
-            before = dict(get_party(con, party_id) or {})
-            con.execute("""UPDATE parties SET code=?,name=?,kind=?,phone=?,address=?,national_id=?,
-                economic_code=?,postal_code=?,credit_limit=?,note=? WHERE id=?""",
-                (data.get("code") or None, name, kind, data.get("phone"), data.get("address"),
-                 data.get("national_id"), data.get("economic_code"), data.get("postal_code"), credit,
-                 data.get("note"), party_id))
-            new_id = party_id
-            db.audit(con, "update_party", "parties", party_id, name, before=before, after=data)
-        else:
-            code = data.get("code") or str(db.next_no(con, "party"))
-            cur = con.execute("""INSERT INTO parties (code,name,kind,phone,address,national_id,economic_code,
-                postal_code,credit_limit,note) VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (code, name, kind, data.get("phone"), data.get("address"), data.get("national_id"),
-                 data.get("economic_code"), data.get("postal_code"), credit, data.get("note")))
-            new_id = cur.lastrowid
-            db.audit(con, "create_party", "parties", new_id, name)
-        if opening and not party_id:
-            set_party_opening(con, new_id, opening)
+    # ماندهٔ اولیه فقط یک‌بار و از طریق سند قطعی ثبت می‌شود؛ تغییر بی‌صدای آن مجاز نیست.
+    current_opening = party_opening(con, party_id) if party_id else 0
+    post_opening = bool(opening) and opening != current_opening
+    if party_id and post_opening and current_opening:
+        raise AccountingError(
+            "ماندهٔ اولیهٔ این شخص قبلاً ثبت شده و سند قطعی قابل تغییر نیست؛ "
+            "برای اصلاح، سند اصلاحی (دریافت/پرداخت یا سند دستی) ثبت کنید.")
+    try:
+        with db.tx(con):
+            if party_id:
+                before = dict(get_party(con, party_id) or {})
+                con.execute("""UPDATE parties SET code=?,name=?,kind=?,phone=?,address=?,national_id=?,
+                    economic_code=?,postal_code=?,credit_limit=?,opening_balance=?,note=? WHERE id=?""",
+                    (data.get("code") or None, name, kind, data.get("phone"), data.get("address"),
+                     data.get("national_id"), data.get("economic_code"), data.get("postal_code"), credit,
+                     opening, data.get("note"), party_id))
+                new_id = party_id
+                db.audit(con, "update_party", "parties", party_id, name, before=before, after=data)
+            else:
+                code = data.get("code") or str(db.next_no(con, "party"))
+                cur = con.execute("""INSERT INTO parties (code,name,kind,phone,address,national_id,economic_code,
+                    postal_code,credit_limit,opening_balance,note) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (code, name, kind, data.get("phone"), data.get("address"), data.get("national_id"),
+                     data.get("economic_code"), data.get("postal_code"), credit, opening, data.get("note")))
+                new_id = cur.lastrowid
+                db.audit(con, "create_party", "parties", new_id, name)
+            if post_opening:
+                set_party_opening(con, new_id, opening)
+    except sqlite3.IntegrityError as e:
+        if "parties.code" in str(e):
+            raise AccountingError("کد این شخص قبلاً برای شخص دیگری ثبت شده است") from e
+        raise AccountingError(f"ذخیرهٔ شخص ممکن نشد: {e}") from e
     return new_id
 
 
@@ -272,21 +300,39 @@ def save_item(con, item_id, data) -> int:
     fields = (data.get("code") or None, name, data.get("unit") or "عدد", sale, purchase, float(vat),
               track, float(qty_dec(data.get("stock_min") or 0, "حداقل موجودی", positive=False)),
               1 if data.get("is_active", True) else 0)
-    with db.tx(con):
-        if item_id:
-            con.execute("""UPDATE items SET code=?,name=?,unit=?,sale_price=?,purchase_price=?,vat_rate=?,
-                track_stock=?,stock_min=?,is_active=? WHERE id=?""", fields + (item_id,))
-            new_id = item_id
-        else:
-            cur = con.execute("""INSERT INTO items (code,name,unit,sale_price,purchase_price,vat_rate,track_stock,
-                stock_min,is_active) VALUES (?,?,?,?,?,?,?,?,?)""", fields)
-            new_id = cur.lastrowid
-        db.audit(con, "save_item", "items", new_id, name)
+    try:
+        with db.tx(con):
+            if item_id:
+                con.execute("""UPDATE items SET code=?,name=?,unit=?,sale_price=?,purchase_price=?,vat_rate=?,
+                    track_stock=?,stock_min=?,is_active=? WHERE id=?""", fields + (item_id,))
+                new_id = item_id
+            else:
+                cur = con.execute("""INSERT INTO items (code,name,unit,sale_price,purchase_price,vat_rate,track_stock,
+                    stock_min,is_active) VALUES (?,?,?,?,?,?,?,?,?)""", fields)
+                new_id = cur.lastrowid
+            db.audit(con, "save_item", "items", new_id, name)
+    except sqlite3.IntegrityError as e:
+        if "items.code" in str(e):
+            raise AccountingError("کد این کالا قبلاً برای کالای دیگری ثبت شده است") from e
+        raise AccountingError(f"ذخیرهٔ کالا ممکن نشد: {e}") from e
     return new_id
 
 
 def delete_item(con, item_id: int) -> None:
+    """غیرفعال‌سازی کالا.
+
+    کالایی که موجودی یا ارزش انبار دارد غیرفعال نمی‌شود، چون گزارش انبار
+    فقط کالاهای فعال را نشان می‌دهد و ارزش آن با حساب موجودی کالا مغایرت پیدا می‌کند.
+    """
     auth.require("item.edit")
+    item = get_item(con, item_id)
+    if not item:
+        raise AccountingError("کالا یافت نشد")
+    qty, _ = stock_state(con, item_id)
+    value = stock_value(con, item_id)
+    if abs(qty) > 1e-9 or value:
+        raise AccountingError(
+            f"«{item['name']}» موجودی/ارزش انبار دارد؛ ابتدا با «اصلاح موجودی» آن را صفر کنید، سپس غیرفعال نمایید.")
     with db.tx(con):
         con.execute("UPDATE items SET is_active=0 WHERE id=?", (item_id,))
         db.audit(con, "deactivate_item", "items", item_id)
@@ -488,6 +534,45 @@ def _stock_move(con, item_id, gdate, qty, value, mtype, inv_id, desc):
                 (item_id, gdate, float(qty), rint(D(value) / qty) if qty else 0, int(value), mtype, inv_id, desc))
 
 
+def _original_sale_cost(con, party_id, item_id) -> int:
+    """بهای تمام‌شدهٔ میانگینِ فروش‌های قطعی یک کالا برای یک طرف حساب (برای برگشت از فروش)."""
+    row = con.execute("""SELECT COALESCE(SUM(l.unit_cost * l.qty),0) c, COALESCE(SUM(l.qty),0) q
+        FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
+        WHERE i.kind='sale' AND i.status='confirmed' AND i.party_id=? AND l.item_id=? AND l.unit_cost>0""",
+        (party_id, item_id)).fetchone()
+    q = D(row["q"] or 0)
+    return rint(D(row["c"] or 0) / q) if q > 0 else 0
+
+
+def _check_return_qty(con, inv: sqlite3.Row, lines) -> None:
+    """جمع برگشت‌ها (شامل همین فاکتور) نباید از مقدار فاکتورِ اصلی بیشتر شود."""
+    kind = inv["kind"]
+    if kind not in ("sale_return", "purchase_return"):
+        return
+    base_kind = "sale" if kind == "sale_return" else "purchase"
+    for ln in lines:
+        if not ln["item_id"]:
+            continue
+        sold = con.execute("""SELECT COALESCE(SUM(l.qty),0) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
+            WHERE i.kind=? AND i.status='confirmed' AND i.party_id=? AND l.item_id=?""",
+            (base_kind, inv["party_id"], ln["item_id"])).fetchone()["q"]
+        # فقط برگشت‌های قطعی‌شده حساب می‌شوند (پیش‌نویس‌های رهاشده سهمی ندارند)
+        returned = con.execute("""SELECT COALESCE(SUM(l.qty),0) q FROM invoice_lines l JOIN invoices i ON i.id=l.invoice_id
+            WHERE i.kind=? AND i.status='confirmed' AND i.party_id=? AND l.item_id=? AND i.id<>?""",
+            (kind, inv["party_id"], ln["item_id"], inv["id"])).fetchone()["q"]
+        item = get_item(con, ln["item_id"])
+        name = item["name"] if item else str(ln["item_id"])
+        if D(returned) + D(ln["qty"]) > D(sold):
+            raise AccountingError(
+                f"مقدار برگشت «{name}» از مقدار فروش/خرید این طرف حساب بیشتر است "
+                f"(مجاز: {utils_qty(sold)}, برگشت‌شده: {utils_qty(returned)})")
+
+
+def utils_qty(v) -> str:
+    q = D(v)
+    return f"{q.normalize():f}" if q != q.to_integral_value() else str(int(q))
+
+
 def confirm_invoice(con, inv_id: int) -> int:
     auth.require("invoice.confirm")
     inv = con.execute("SELECT * FROM invoices WHERE id=?", (inv_id,)).fetchone()
@@ -500,6 +585,7 @@ def confirm_invoice(con, inv_id: int) -> int:
     lines = con.execute("SELECT * FROM invoice_lines WHERE invoice_id=? ORDER BY id", (inv_id,)).fetchall()
     if not lines:
         raise AccountingError("فاکتور بدون قلم است")
+    _check_return_qty(con, inv, lines)
     gdate, kind, party = inv["inv_date"], inv["kind"], inv["party_id"]
     _check_period(con, gdate)
     alloc = _allocate_discount(lines, inv["discount"])
@@ -507,7 +593,7 @@ def confirm_invoice(con, inv_id: int) -> int:
     moves = []
     cogs_total = stock_amount = expense_amount = 0
     with db.tx(con):
-        for ln, disc in zip(lines, alloc):
+        for ln, disc in zip(lines, alloc, strict=False):
             item = get_item(con, ln["item_id"]) if ln["item_id"] else None
             net = int(ln["line_total"]) - disc
             if not item or not item["track_stock"]:
@@ -529,7 +615,16 @@ def confirm_invoice(con, inv_id: int) -> int:
                 mv_qty, mv_val = -qty, -rint(qty * avg)
                 cogs_total += -mv_val
             elif kind == "sale_return":
-                avg = D(val) / q if q > 0 else D(ln["unit_cost"] or 0)
+                # بهای واحد از ردیف فروشِ اصلی گرفته می‌شود تا ارزش انبارِ برگشتی
+                # با بهای تمام‌شدهٔ اصلی بخواند (میانگین فعلی اگر موجودی صفر باشد صفر است).
+                line_cost = int(ln["unit_cost"] or 0)
+                if line_cost > 0:
+                    avg = D(line_cost)
+                elif q > 0 and val > 0:
+                    avg = D(val) / q
+                else:
+                    # موجودی صفر است و بهای ردیف هم ثبت نشده: از بهای فروش‌های قطعی همان کالا
+                    avg = D(_original_sale_cost(con, party, item["id"]))
                 mv_qty, mv_val = qty, rint(qty * avg)
                 cogs_total -= mv_val
             else:
@@ -607,13 +702,26 @@ def cancel_invoice(con, inv_id: int, reason: str = "", gdate: str | None = None)
     if inv["paid_amount"]:
         raise AccountingError("این فاکتور دریافت/پرداخت ثبت‌شده دارد؛ ابتدا آن‌ها را ابطال کنید")
     gdate = db.validate_gdate(gdate or date.today().isoformat())
+    moves = con.execute("SELECT * FROM stock_moves WHERE ref_type='invoice' AND ref_id=? AND move_type<>'adjust'",
+                        (inv_id,)).fetchall()
     with db.tx(con):
+        # تاریخ ابطال باید پس از آخرین گردش هر کالا باشد، وگرنه کالای فروخته‌شده موجودی منفی می‌شود
+        for m in moves:
+            _check_stock_date(con, m["item_id"], gdate)
+            _check_period(con, gdate)
+        for m in moves:
+            _stock_move(con, m["item_id"], gdate, -D(m["qty"]), -int(m["value"]), "adjust", inv_id,
+                        f"ابطال فاکتور {inv['no']}")
+        for item_id in {m["item_id"] for m in moves}:
+            qty, _ = stock_state(con, item_id)
+            if qty < 0:
+                item = get_item(con, item_id)
+                raise AccountingError(
+                    f"ابطال این فاکتور موجودی «{item['name'] if item else item_id}» را منفی می‌کند؛ "
+                    "ابتدا برگشت/اصلاح مربوطه را ثبت کنید.")
         rev = _reverse_entry_lines(con, inv["journal_entry_id"])
         entry_id = post_entry(con, gdate, "adjustment", rev, str(inv["no"]),
                               f"ابطال {KIND_LABEL[inv['kind']]} شماره {inv['no']} — {reason}", inv["journal_entry_id"])
-        for m in con.execute("SELECT * FROM stock_moves WHERE ref_type='invoice' AND ref_id=? AND move_type<>'adjust'", (inv_id,)).fetchall():
-            _check_stock_date(con, m["item_id"], gdate)
-            _stock_move(con, m["item_id"], gdate, -D(m["qty"]), -int(m["value"]), "adjust", inv_id, f"ابطال فاکتور {inv['no']}")
         con.execute("UPDATE invoices SET status='cancelled' WHERE id=?", (inv_id,))
         db.audit(con, "cancel_invoice", "invoices", inv_id, reason, after={"reversal_entry": entry_id})
 
@@ -667,6 +775,16 @@ def add_payment(con, direction, party_id, amount, gdate, method="cash", invoice_
                 raise AccountingError("نوع فاکتور با دریافت/پرداخت سازگار نیست")
             if amount > inv["total"] - inv["paid_amount"]:
                 raise AccountingError("مبلغ پرداخت از ماندهٔ فاکتور بیشتر است")
+        else:
+            # دریافت/پرداختِ بدون ارجاع نباید از ماندهٔ خود شخص بیشتر باشد
+            # (دریافت بیشتر از بدهی مشتری = بستانکاری؛ پرداخت بیشتر از بدهی ما به تامین‌کننده = بی‌دلیل).
+            bal = con.execute("SELECT COALESCE(balance,0) v FROM v_party_balance WHERE party_id=?",
+                              (party_id,)).fetchone()["v"]
+            settleable = bal if direction == "receipt" else -bal
+            if amount > settleable:
+                raise AccountingError(
+                    f"مبلغ از ماندهٔ حساب این شخص بیشتر است (مانده: {max(0, settleable):,} ریال)؛ "
+                    "مبلغ را کاهش دهید یا ابتدا فاکتور مربوطه را ثبت کنید.")
         jdate = jalali.to_jalali_str(gdate)
         no = db.next_no(con, "payment", jdate[:4])
         cur = con.execute("""INSERT INTO payments (no,direction,method,party_id,amount,pay_date,jalali_date,invoice_id,description)
@@ -733,35 +851,55 @@ def report_sales(con, date_from, date_to):
     detail = []
     for inv in invs:
         cogs = inv["cogs_amount"] or sum(rint(D(r["qty"]) * D(r["unit_cost"])) for r in invoice_lines(con, inv["id"]))
+        # cogs_amount فاکتور برگشت از فروش به‌صورت منفی ذخیره می‌شود؛ مبلغ نمایشی مثبت است
+        # و علامت آن در محاسبهٔ سود با signed_cogs اعمال می‌گردد.
+        cogs = abs(int(cogs))
         net = inv["subtotal"] - inv["discount"]
         if inv["kind"] == "sale":
             total_sale += net; total_cogs += cogs; signed_net, signed_cogs = net, cogs
         else:
             total_return += net; total_cogs -= cogs; signed_net, signed_cogs = -net, -cogs
         total_vat += inv["vat_amount"] if inv["kind"] == "sale" else -inv["vat_amount"]
+        # سود ناخالص = درآمد خالص − بهای تمام‌شده؛ برای برگشت از فروش هر دو طرف منفی می‌شوند
+        # (برگشت هم درآمد را کم می‌کند و هم بهای تمام‌شده را برمی‌گرداند).
         gp = signed_net - signed_cogs
         detail.append({"inv": inv, "net": net, "cogs": cogs, "gross_profit": gp,
-                       "margin": (100.0 * gp / signed_net) if signed_net else 0.0})
+                       "margin": (100.0 * gp / abs(signed_net)) if signed_net else 0.0})
     net_sales = total_sale - total_return
     return {"detail": detail, "gross_sales": total_sale, "returns": total_return, "net_sales": net_sales,
             "cogs": total_cogs, "vat": total_vat, "gross_profit": net_sales - total_cogs,
             "margin": (100.0 * (net_sales - total_cogs) / net_sales) if net_sales else 0.0}
 
 
-def report_stock(con):
+def report_stock(con, include_inactive=False):
+    """گزارش موجودی انبار.
+
+    کالاهای غیرفعالی که هنوز موجودی/ارزش دارند هم نمایش داده می‌شوند تا ارزش
+    گزارش انبار با حساب موجودی کالا مغایرت پیدا نکند.
+    """
+    sql = "SELECT * FROM items WHERE track_stock=1"
+    if not include_inactive:
+        sql += " AND (is_active=1 OR id IN (SELECT DISTINCT item_id FROM stock_moves))"
     rows, total = [], 0
-    for it in con.execute("SELECT * FROM items WHERE track_stock=1 AND is_active=1 ORDER BY name"):
+    for it in con.execute(sql + " ORDER BY name"):
         qty, cost = stock_state(con, it["id"])
         value = stock_value(con, it["id"])
+        if not include_inactive and not it["is_active"] and abs(qty) < 1e-9:
+            continue
         total += value
-        rows.append({"item": it, "qty": qty, "avg_cost": cost, "value": value, "low": qty <= float(it["stock_min"])})
+        rows.append({"item": it, "qty": qty, "avg_cost": cost, "value": value,
+                     "low": it["is_active"] and qty <= float(it["stock_min"]),
+                     "inactive": not it["is_active"]})
     return {"rows": rows, "total_value": total}
 
 
 def report_customers(con, kind="customer"):
+    """ماندهٔ اشخاص. اشخاص غیرفعالی که ماندهٔ باز دارند هم می‌آیند تا جمعِ مانده‌ها
+    با حساب دریافتنی/پرداختنی دفتر کل برابر بماند."""
     rows, total = [], 0
     for p in con.execute("""SELECT p.*, COALESCE(b.balance,0) AS balance FROM parties p
-        LEFT JOIN v_party_balance b ON b.party_id=p.id WHERE p.is_active=1 AND (p.kind=? OR p.kind='both')
+        LEFT JOIN v_party_balance b ON b.party_id=p.id
+        WHERE (p.is_active=1 OR COALESCE(b.balance,0)<>0) AND (p.kind=? OR p.kind='both')
         ORDER BY balance DESC,p.name""", (kind,)):
         unpaid = con.execute("""SELECT COUNT(*) c, COALESCE(SUM(total-paid_amount),0) s FROM invoices
             WHERE party_id=? AND status='confirmed' AND kind=? AND total-paid_amount>0""",
@@ -836,8 +974,15 @@ def report_reconciliation(con):
     bad_payments = con.execute("""SELECT p.id FROM payments p JOIN invoices i ON i.id=p.invoice_id
         WHERE p.is_cancelled=0 AND (i.party_id<>p.party_id OR i.status<>'confirmed'
         OR (p.direction='receipt' AND i.kind<>'sale') OR (p.direction='payment' AND i.kind<>'purchase'))""").fetchall()
+    # پرداخت/دریافتی که از ماندهٔ فاکتور بیشتر شده باشد (بایت‌های تاریخی)
+    overpaid = con.execute("""SELECT i.id, i.no, i.kind, i.paid_amount, i.total FROM invoices i
+        WHERE i.status='confirmed' AND i.paid_amount > i.total""").fetchall()
+    negative_stock = [r["item_id"] for r in con.execute(
+        "SELECT item_id FROM v_stock_balance WHERE qty < 0").fetchall()]
     return {"stock_report": stock, "inventory_gl": gl, "stock_difference": stock - gl,
             "invalid_payments": [r["id"] for r in bad_payments],
+            "overpaid_invoices": [r["id"] for r in overpaid],
+            "negative_stock_items": negative_stock,
             "trial": report_trial_balance(con), "balance_sheet": report_balance_sheet(con)}
 
 
