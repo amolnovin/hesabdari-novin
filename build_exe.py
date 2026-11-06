@@ -71,6 +71,19 @@ def embed_schema():
     print(f"✓ schema.sql در schema_embedded.py جاسازی شد ({len(sql):,} کاراکتر)")
 
 
+def schema_is_embedded() -> bool:
+    """آیا schema_embedded.py موجود و هم‌خوان با schema.sql است؟"""
+    src = os.path.join(HERE, "schema.sql")
+    dst = os.path.join(HERE, "schema_embedded.py")
+    if not (os.path.exists(src) and os.path.exists(dst)):
+        return False
+    with open(src, encoding="utf-8") as f:
+        sql = f.read()
+    with open(dst, encoding="utf-8") as f:
+        embedded = f.read()
+    return sql.strip() in embedded
+
+
 def main():
     onefile = "--onefile" in sys.argv
     console = "--console" in sys.argv
@@ -84,11 +97,13 @@ def main():
         print("❌ فایل main.py در این پوشه یافت نشد")
         sys.exit(1)
 
-    if not dry_run:
-        embed_schema()
     if dry_run:
-        print("\n[حالت آزمایشی] نصب بسته‌ها و جاسازی schema نادیده گرفته شد.")
+        # حالت آزمایشی هیچ فایلی نمی‌نویسد؛ فقط گزارش می‌دهد.
+        state = "هم‌خوان است" if schema_is_embedded() else "هم‌خوان/موجود نیست (در ساخت واقعی بازتولید می‌شود)"
+        print(f"\n[حالت آزمایشی] schema_embedded.py: {state}")
+        print("[حالت آزمایشی] نصب بسته‌ها و ساخت exe انجام نمی‌شود.")
     else:
+        embed_schema()
         ensure_module("PySide6", "PySide6")
         ensure_module("pyinstaller", "PyInstaller")
 

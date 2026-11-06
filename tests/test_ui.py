@@ -7,21 +7,30 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["ACC_DB_PATH"] = os.path.join(tempfile.mkdtemp(), "ui_test.db")
 os.environ["ACC_DATA_DIR"] = os.path.dirname(os.environ["ACC_DB_PATH"])
 
-from PySide6.QtCore import Qt, QTimer          # noqa: E402
-from PySide6.QtWidgets import QApplication     # noqa: E402
+# این فایل یک اسکریپت سناریویی است و در محیط بدون Qt (یا بدون کتابخانه‌های GL)
+# نباید جمع‌آوری pytest را متوقف کند.
+try:
+    import PySide6  # noqa: E402,F401
+    from PySide6.QtCore import Qt  # noqa: E402,F401
+    from PySide6.QtWidgets import QApplication  # noqa: E402
+except Exception as e:  # pragma: no cover - فقط در محیط بدون Qt
+    pytest.skip(f"PySide6/کتابخانه‌های گرافیکی در دسترس نیست: {e}", allow_module_level=True)
 
-import auth                                    # noqa: E402
-import db                                      # noqa: E402
-import repo                                    # noqa: E402
-import utils                                   # noqa: E402
+import auth  # noqa: E402
+import db  # noqa: E402
+import repo  # noqa: E402
+import utils  # noqa: E402
+
 _SERVICE = auth.service_mode(); _SERVICE.__enter__()
-from ui.main_window import MainWindow          # noqa: E402
-from ui.invoices import InvoiceDialog          # noqa: E402
+from ui.invoices import InvoiceDialog  # noqa: E402
+from ui.main_window import MainWindow  # noqa: E402
 
 con = db.connect()
 db.init_db(con)
@@ -197,8 +206,9 @@ step("دیالوگ مشاهدهٔ فاکتور موجود", open_existing_invoic
 
 def login_flow():
     """تست دیالوگِ اولین اجرا و ورود"""
-    from ui.login import FirstRunDialog, LoginDialog
     import tempfile
+
+    from ui.login import FirstRunDialog, LoginDialog
     con2 = db.connect(os.path.join(tempfile.mkdtemp(), "login.db"))
     db.init_db(con2)
     assert auth.count_users(con2) == 0
@@ -257,4 +267,6 @@ for p in shots:
 print("\n" + "=" * 66)
 print(f"نتیجه: {'✅ همه تست‌های رابط کاربری موفق بود' if not errors else f'❌ {len(errors)} خطا'}")
 print("=" * 66)
-sys.exit(1 if errors else 0)
+
+if __name__ == "__main__":
+    sys.exit(1 if errors else 0)
