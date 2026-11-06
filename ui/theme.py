@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 LIGHT = {

@@ -3,15 +3,32 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 import repo
 import utils
 from ui.widgets import (
-    DateEdit, FormDialog, MoneyEdit, NumberEdit, add_row, export_csv,
-    make_table, msg_error, msg_info, msg_warn, msg_ask, selected_id,
+    DateEdit,
+    FormDialog,
+    MoneyEdit,
+    NumberEdit,
+    add_row,
+    export_csv,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    selected_id,
 )
 
 
@@ -19,7 +36,14 @@ class ProductsTab(QWidget):
     def __init__(self, con, parent=None):
         super().__init__(parent)
         self.con = con
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        if hasattr(self, "refresh"):
+            self.refresh()
 
     # ------------------------------------------------------------------
     def _build(self):
@@ -55,7 +79,7 @@ class ProductsTab(QWidget):
 
         self.table = make_table(
             ["شناسه", "کد", "نام", "واحد", "قیمت فروش", "نرخ مالیات٪",
-             "موجودی", "میانگین بهای تمام‌شده", "ارزش موجودی (ریال)", "حداقل موجودی"])
+             "موجودی", "میانگین بهای تمام‌شده", f"ارزش موجودی ({self._unit})", "حداقل موجودی"])
         lay.addWidget(self.table)
 
         self.summary = QLabel("")
@@ -79,8 +103,8 @@ class ProductsTab(QWidget):
                 low.append(r["name"])
             add_row(self.table, [
                 r["id"], r["code"] or "", r["name"], r["unit"],
-                utils.fmt(r["sale_price"]), f"{r['vat_rate']:g}",
-                utils.fmt_qty(qty), utils.fmt(cost), utils.fmt(value),
+                repo.fmt_money(self.con, r["sale_price"]), f"{r['vat_rate']:g}",
+                utils.fmt_qty(qty), repo.fmt_money(self.con, cost), repo.fmt_money(self.con, value),
                 utils.fmt_qty(r["stock_min"]),
             ], data=r["id"])
             if r["track_stock"] and qty <= float(r["stock_min"] or 0):
@@ -89,7 +113,7 @@ class ProductsTab(QWidget):
                     if item:
                         item.setBackground(Qt.lightGray)
         note = f"  ⚠️ موجودیِ کم: {('، '.join(low))}" if low else ""
-        self.summary.setText(f"تعداد: {len(rows)}  |  ارزش کل موجودی انبار: {utils.fmt(total)} ریال{note}")
+        self.summary.setText(f"تعداد: {len(rows)}  |  ارزش کل موجودی انبار: {repo.fmt_money(self.con, total)} {self._unit}{note}")
 
     # ------------------------------------------------------------------
     def _dialog(self, item=None):
@@ -98,8 +122,8 @@ class ProductsTab(QWidget):
             [("name", "نام *", "text"),
              ("code", "کد کالا", "text"),
              ("unit", "واحد اندازه‌گیری", "text"),
-             ("sale_price", "قیمت فروش (ریال)", "money"),
-             ("purchase_price", "آخرین قیمت خرید (ریال)", "money"),
+             ("sale_price", f"قیمت فروش ({self._unit})", "money"),
+             ("purchase_price", f"آخرین قیمت خرید ({self._unit})", "money"),
              ("vat_rate", "نرخ مالیات (درصد)", "number"),
              ("stock_min", "حداقل موجودی (هشدار)", "number")],
             dict(item) if item else {"unit": "عدد", "vat_rate": float(repo.db.get_setting(self.con, "default_vat_rate", "10"))},
@@ -176,12 +200,12 @@ class ProductsTab(QWidget):
         d.setLayoutDirection(Qt.RightToLeft)
         lay = QVBoxLayout(d)
         lay.addWidget(QLabel(f"موجودی فعلی: {utils.fmt_qty(cur_qty)} {item['unit']}  •  "
-                             f"بهای تمام‌شده: {utils.fmt(cur_cost)} ریال"))
+                             f"بهای تمام‌شده: {repo.fmt_money(self.con, cur_cost)} {self._unit}"))
         form = QHBoxLayout()
         form.addWidget(QLabel("موجودی واقعی (جدید):"))
         qty_edit = NumberEdit(value=cur_qty)
         form.addWidget(qty_edit)
-        form.addWidget(QLabel("بهای هر واحد (ریال):"))
+        form.addWidget(QLabel(f"بهای هر واحد ({self._unit}):"))
         cost_edit = MoneyEdit(value=cur_cost)
         form.addWidget(cost_edit)
         lay.addLayout(form)
@@ -227,14 +251,13 @@ class ProductsTab(QWidget):
                   "sale_return": "برگشت از فروش", "purchase_return": "برگشت از خرید",
                   "adjust": "اصلاحی"}
         for r in rows:
-            before = qty
             qty += r["qty"]
             add_row(t, [
                 repo.jalali.to_jalali_str(r["move_date"]),
                 labels.get(r["move_type"], r["move_type"]),
                 utils.fmt_qty(r["qty"]) if r["qty"] > 0 else "",
                 utils.fmt_qty(-r["qty"]) if r["qty"] < 0 else "",
-                utils.fmt(r["unit_cost"]), utils.fmt_qty(qty),
+                repo.fmt_money(self.con, r["unit_cost"]), utils.fmt_qty(qty),
                 f"{r['ref_type'] or ''} {r['ref_id'] or ''}".strip(),
                 r["description"] or "",
             ])

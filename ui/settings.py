@@ -2,14 +2,22 @@
 """برگهٔ تنظیمات، پشتیبان‌گیری و مشاهدهٔ کدینگ حساب‌ها"""
 
 import os
-import shutil
 import subprocess
 import sys
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 import auth
@@ -18,14 +26,24 @@ import jalali
 import repo
 import utils
 from ui.login import ChangePasswordDialog
-from ui.widgets import (FormDialog, add_row, apply_permissions, make_table,
-                        msg_error, msg_info, msg_warn, msg_ask, selected_id)
+from ui.widgets import (
+    FormDialog,
+    add_row,
+    apply_permissions,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    selected_id,
+)
 
 
 class SettingsTab(QWidget):
-    def __init__(self, con, parent=None):
+    def __init__(self, con, parent=None, on_settings_saved=None):
         super().__init__(parent)
         self.con = con
+        self.on_settings_saved = on_settings_saved
         self._build()
         self.load()
 
@@ -177,6 +195,9 @@ class SettingsTab(QWidget):
             msg_warn(self, "نرخ مالیات باید عدد باشد")
         db.set_setting(self.con, "money_unit", self.money.currentData())
         self.con.commit()
+        # واحد پول و سایر تنظیمات باید بی‌درنگ در همهٔ برگه‌ها دیده شود
+        if callable(self.on_settings_saved):
+            self.on_settings_saved()
         msg_info(self, "تنظیمات ذخیره شد")
 
     def update_period_status(self):
@@ -193,10 +214,10 @@ class SettingsTab(QWidget):
         fy_id = self.period_year.currentData()
         month = self.period_month.currentData()
         locked = repo.period_locked(self.con, fy_id, month)
-        if locked and not msg_ask(self, f"ماه انتخابی باز شود؟"):
+        if locked and not msg_ask(self, "ماه انتخابی باز شود؟"):
             return
         if not locked and not msg_ask(
-                self, f"ماه انتخابی قفل شود؟\nپس از قفل شدن، ثبت سند در این ماه ممکن نیست."):
+                self, "ماه انتخابی قفل شود؟\nپس از قفل شدن، ثبت سند در این ماه ممکن نیست."):
             return
         try:
             repo.set_period_lock(self.con, fy_id, month, not locked)
@@ -284,7 +305,7 @@ class SettingsTab(QWidget):
                 subprocess.run(["open", path])
             else:
                 subprocess.run(["xdg-open", path])
-        except Exception as e:
+        except Exception:
             msg_info(self, f"مسیر پوشه:\n{path}")
 
 

@@ -2,21 +2,38 @@
 """برگهٔ فاکتورها (فروش، خرید، برگشت‌ها)"""
 
 from functools import partial
+from html import escape
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-
-from html import escape
 
 import jalali
 import repo
 import utils
 from ui.widgets import (
-    DateEdit, MoneyEdit, add_row, export_csv, make_table, msg_error, msg_info,
-    msg_warn, msg_ask, print_html, selected_id,
+    DateEdit,
+    MoneyEdit,
+    add_row,
+    export_csv,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    print_html,
+    selected_id,
 )
 
 STATUS_LABEL = {"draft": "پیش‌نویس", "confirmed": "قطعی", "cancelled": "ابطال‌شده"}
@@ -38,6 +55,7 @@ class InvoiceDialog(QDialog):
         self.invoice_id = invoice_id
         self.rows: list[dict] = []
         self.saved_id = None
+        self._unit = repo.unit_label(con)
         self.setLayoutDirection(Qt.RightToLeft)
         self.setWindowTitle(f"{repo.KIND_LABEL[kind]}" + (f" شماره {self._no()}" if invoice_id else " — جدید"))
         self.resize(960, 580)
@@ -77,8 +95,8 @@ class InvoiceDialog(QDialog):
         head2.addWidget(self.desc, 1)
         lay.addLayout(head2)
 
-        self.lines = make_table(["کالا / خدمت", "تعداد", "قیمت واحد (ریال)",
-                                 "تخفیف (ریال)", "مالیات٪", "خالص (ریال)", ""])
+        self.lines = make_table(["کالا / خدمت", "تعداد", f"قیمت واحد ({self._unit})",
+                                 f"تخفیف ({self._unit})", "مالیات٪", f"خالص ({self._unit})", ""])
         self.lines.setEditTriggers(QAbstractItemView.DoubleClicked |
                                    QAbstractItemView.EditKeyPressed |
                                    QAbstractItemView.AnyKeyPressed)
@@ -93,7 +111,7 @@ class InvoiceDialog(QDialog):
         lay.addLayout(row_btns)
 
         tot = QHBoxLayout()
-        tot.addWidget(QLabel("تخفیف کل (ریال):"))
+        tot.addWidget(QLabel(f"تخفیف کل ({self._unit}):"))
         self.discount = MoneyEdit(value=0)
         self.discount.textChanged.connect(self._recalc)
         tot.addWidget(self.discount)
@@ -166,9 +184,9 @@ class InvoiceDialog(QDialog):
             combo.currentIndexChanged.connect(partial(self._on_item_selected, i))
             self.lines.setCellWidget(i, 0, combo)
 
-            for c, text in ((1, f"{rd['qty']:g}"), (2, utils.fmt(rd["price"])),
-                            (3, utils.fmt(rd["discount"])), (4, f"{rd['vat']:g}"),
-                            (5, utils.fmt(self._line_net(rd)))):
+            for c, text in ((1, f"{rd['qty']:g}"), (2, repo.fmt_money(self.con, rd["price"])),
+                            (3, repo.fmt_money(self.con, rd["discount"])), (4, f"{rd['vat']:g}"),
+                            (5, repo.fmt_money(self.con, self._line_net(rd)))):
                 it = QTableWidgetItem(text)
                 it.setTextAlignment(Qt.AlignCenter)
                 if c == 5:
@@ -226,12 +244,12 @@ class InvoiceDialog(QDialog):
         for i, rd in enumerate(self.rows):
             cell = self.lines.item(i, 5)
             if cell is not None:
-                cell.setText(utils.fmt(self._line_net(rd)))
+                cell.setText(repo.fmt_money(self.con, self._line_net(rd)))
         self.lines.blockSignals(False)
         totals = repo.calc_invoice([self._line_dict(rd) for rd in self.rows], self.discount.value)
-        self.lbl_subtotal.setText(utils.fmt(totals["subtotal"]))
-        self.lbl_vat.setText(utils.fmt(totals["vat_amount"]))
-        self.lbl_total.setText(utils.fmt(totals["total"]))
+        self.lbl_subtotal.setText(repo.fmt_money(self.con, totals["subtotal"]))
+        self.lbl_vat.setText(repo.fmt_money(self.con, totals["vat_amount"]))
+        self.lbl_total.setText(repo.fmt_money(self.con, totals["total"]))
 
     def _line_dict(self, rd):
         return {"item_id": rd["item_id"], "description": rd["desc"] or None,
@@ -304,7 +322,14 @@ class InvoicesTab(QWidget):
     def __init__(self, con, parent=None):
         super().__init__(parent)
         self.con = con
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        if hasattr(self, "refresh"):
+            self.refresh()
 
     def _build(self):
         lay = QVBoxLayout(self)
@@ -384,17 +409,17 @@ class InvoicesTab(QWidget):
         for r in rows:
             add_row(self.table, [
                 r["id"], r["no"], r["jalali_date"], r["party_name"],
-                utils.fmt(r["subtotal"] - r["discount"]), utils.fmt(r["vat_amount"]),
-                utils.fmt(r["total"]), utils.fmt(r["paid_amount"]),
-                utils.fmt(r["remainder"]), STATUS_LABEL.get(r["status"], r["status"]),
+                repo.fmt_money(self.con, r["subtotal"] - r["discount"]), repo.fmt_money(self.con, r["vat_amount"]),
+                repo.fmt_money(self.con, r["total"]), repo.fmt_money(self.con, r["paid_amount"]),
+                repo.fmt_money(self.con, r["remainder"]), STATUS_LABEL.get(r["status"], r["status"]),
                 r["description"] or "",
             ], data=r["id"])
             if r["status"] == "confirmed":
                 tot += r["total"]
                 paid += r["paid_amount"]
         self.summary.setText(
-            f"تعداد: {len(rows)}  |  جمع مبالغ قطعی: {utils.fmt(tot)} ریال  |  "
-            f"دریافت/پرداخت‌شده: {utils.fmt(paid)} ریال  |  مانده: {utils.fmt(tot - paid)} ریال")
+            f"تعداد: {len(rows)}  |  جمع مبالغ قطعی: {repo.fmt_money(self.con, tot)} {self._unit}  |  "
+            f"دریافت/پرداخت‌شده: {repo.fmt_money(self.con, paid)} {self._unit}  |  مانده: {repo.fmt_money(self.con, tot - paid)} {self._unit}")
 
     # ------------------------------------------------------------------
     def new_invoice(self):
@@ -461,8 +486,8 @@ class InvoicesTab(QWidget):
             nm = escape(l["item_name"] or l["description"] or "")
             rows += (f"<tr><td>{i}</td><td>{nm}</td>"
                      f"<td>{utils.fmt_qty(l['qty'])} {escape(l['unit'] or '')}</td>"
-                     f"<td>{utils.fmt(l['unit_price'])}</td><td>{utils.fmt(l['discount'])}</td>"
-                     f"<td>{utils.fmt(l['line_total'])}</td></tr>")
+                     f"<td>{repo.fmt_money(self.con, l['unit_price'])}</td><td>{repo.fmt_money(self.con, l['discount'])}</td>"
+                     f"<td>{repo.fmt_money(self.con, l['line_total'])}</td></tr>")
         return f"""
         <html><body dir="rtl" style="font-family:Tahoma;font-size:12px">
         <h2 style="text-align:center;margin:0">{escape(company.get('company_name',''))}</h2>
@@ -481,14 +506,14 @@ class InvoicesTab(QWidget):
                style="border-collapse:collapse;font-size:12px">
           <tr style="background:#eef3f7">
             <th>ردیف</th><th>شرح کالا/خدمت</th><th>تعداد</th><th>قیمت واحد</th>
-            <th>تخفیف</th><th>مبلغ (ریال)</th></tr>
+            <th>تخفیف</th><th>مبلغ ({self._unit})</th></tr>
           {rows}
         </table><br>
         <table width="100%" style="font-size:13px">
-          <tr><td>جمع خالص:</td><td><b>{utils.fmt(inv['subtotal'])}</b></td></tr>
-          <tr><td>تخفیف:</td><td><b>{utils.fmt(inv['discount'])}</b></td></tr>
-          <tr><td>مالیات بر ارزش افزوده:</td><td><b>{utils.fmt(inv['vat_amount'])}</b></td></tr>
-          <tr><td>قابل پرداخت:</td><td><b>{utils.fmt(inv['total'])}</b> ریال</td></tr>
+          <tr><td>جمع خالص:</td><td><b>{repo.fmt_money(self.con, inv['subtotal'])}</b></td></tr>
+          <tr><td>تخفیف:</td><td><b>{repo.fmt_money(self.con, inv['discount'])}</b></td></tr>
+          <tr><td>مالیات بر ارزش افزوده:</td><td><b>{repo.fmt_money(self.con, inv['vat_amount'])}</b></td></tr>
+          <tr><td>قابل پرداخت:</td><td><b>{repo.fmt_money(self.con, inv['total'])}</b> {self._unit}</td></tr>
         </table>
         <hr>
         <p style="text-align:center;color:#666;font-size:11px">{escape(company.get('invoice_footer',''))}</p>

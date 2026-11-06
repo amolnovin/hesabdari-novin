@@ -2,9 +2,21 @@
 """پنجرهٔ اصلی با ناوبری کناری، داشبورد و برگه‌ها."""
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QPushButton, QScrollArea, QStackedWidget, QStatusBar, QTabWidget,
-    QVBoxLayout, QWidget,
+    QApplication,
+    QButtonGroup,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QStatusBar,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 import auth
@@ -101,7 +113,7 @@ class MainWindow(QMainWindow):
         self.tab_payments = PaymentsTab(con, self)
         self.tab_cheques = ChequesTab(con, self)
         self.tab_reports = ReportsTab(con, self)
-        self.tab_settings = SettingsTab(con, self)
+        self.tab_settings = SettingsTab(con, self, on_settings_saved=self.apply_display_settings)
         self.pages = [self.dashboard, self.tab_customers, self.tab_products, self.tab_invoices,
                       self.tab_payments, self.tab_cheques, self.tab_reports, self.tab_settings]
         for w in self.pages:
@@ -126,6 +138,17 @@ class MainWindow(QMainWindow):
         for w in self.pages:
             blocked += apply_permissions(w)
         return blocked
+
+    def apply_display_settings(self):
+        """پس از ذخیرهٔ تنظیمات، واحد پول/عنوان‌ها را در همهٔ برگه‌ها تازه می‌کند."""
+        for w in self.pages:
+            if hasattr(w, "refresh_unit"):
+                try:
+                    w.refresh_unit()
+                except Exception as e:  # یک برگهٔ معیوب نباید بقیه را متوقف کند
+                    self.statusBar().showMessage(f"خطا در بروزرسانی نمایش: {e}")
+        if hasattr(self.dashboard, "refresh"):
+            self.dashboard.refresh()
 
     def open_tab(self, index: int):
         index = max(0, min(index, len(self.pages) - 1))
@@ -266,7 +289,7 @@ class MonthlyChart(QWidget):
         self.update()
 
     def paintEvent(self, event):
-        from PySide6.QtGui import QPainter, QColor, QPen, QFont
+        from PySide6.QtGui import QColor, QFont, QPainter, QPen
         app = QApplication.instance()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)

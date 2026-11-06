@@ -3,16 +3,27 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QWidget,
+    QComboBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 import jalali
 import repo
-import utils
 from ui.widgets import (
-    DateEdit, FormDialog, MoneyEdit, add_row, export_csv, make_table,
-    msg_error, msg_info, msg_warn, msg_ask, selected_id,
+    FormDialog,
+    add_row,
+    export_csv,
+    make_table,
+    msg_ask,
+    msg_error,
+    msg_info,
+    msg_warn,
+    selected_id,
 )
 
 STATUS_LABEL = repo.CHEQUE_STATUS
@@ -22,7 +33,14 @@ class ChequesTab(QWidget):
     def __init__(self, con, parent=None):
         super().__init__(parent)
         self.con = con
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        if hasattr(self, "refresh"):
+            self.refresh()
 
     def _build(self):
         lay = QVBoxLayout(self)
@@ -65,7 +83,7 @@ class ChequesTab(QWidget):
         lay.addLayout(btns)
 
         self.table = make_table(
-            ["شناسه", "نوع", "سریال", "بانک", "طرف حساب", "مبلغ (ریال)",
+            ["شناسه", "نوع", "سریال", "بانک", "طرف حساب", f"مبلغ ({self._unit})",
              "تاریخ صدور", "تاریخ سررسید", "روز باقی‌مانده", "وضعیت", "شرح"])
         lay.addWidget(self.table)
 
@@ -98,7 +116,7 @@ class ChequesTab(QWidget):
             add_row(self.table, [
                 r["id"], "دریافتنی" if r["cheque_type"] == "received" else "پرداختنی",
                 r["serial_no"], r["bank_name"] or "", r["party_name"],
-                utils.fmt(r["amount"]), r["jalali_issue"], r["jalali_due"],
+                repo.fmt_money(self.con, r["amount"]), r["jalali_issue"], r["jalali_due"],
                 days_text, STATUS_LABEL.get(r["status"], r["status"]),
                 r["description"] or "",
             ], data=r["id"])
@@ -108,8 +126,8 @@ class ChequesTab(QWidget):
                     if it:
                         it.setBackground(Qt.lightGray)
         self.summary.setText(
-            f"تعداد: {len(rows)}  |  در جریان وصول (دریافتنی): {utils.fmt(rec_pending)} ریال  |  "
-            f"در جریان (پرداختنی): {utils.fmt(paid_pending)} ریال  |  "
+            f"تعداد: {len(rows)}  |  در جریان وصول (دریافتنی): {repo.fmt_money(self.con, rec_pending)} {self._unit}  |  "
+            f"در جریان (پرداختنی): {repo.fmt_money(self.con, paid_pending)} {self._unit}  |  "
             f"سررسید گذشته: {overdue}  |  هفتهٔ جاری: {due_soon}")
 
     # ------------------------------------------------------------------
@@ -119,7 +137,7 @@ class ChequesTab(QWidget):
             [("serial_no", "شماره سریال چک *", "text"),
              ("bank_name", "بانک", "text"),
              ("branch", "شعبه", "text"),
-             ("amount", "مبلغ (ریال) *", "money"),
+             ("amount", f"مبلغ ({self._unit}) *", "money"),
              ("issue_date", "تاریخ صدور", "date"),
              ("due_date", "تاریخ سررسید", "date"),
              ("sayad_id", "شناسه صیاد", "text"),

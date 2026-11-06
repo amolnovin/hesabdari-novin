@@ -1,18 +1,27 @@
 # -*- coding: utf-8 -*-
 """برگهٔ گزارشات"""
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
-)
-
 from html import escape
+
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 import jalali
 import repo
 import utils
 from ui.widgets import (
-    DateEdit, add_row, export_csv, make_table, msg_warn, print_html,
+    DateEdit,
+    add_row,
+    export_csv,
+    make_table,
+    msg_warn,
+    print_html,
 )
 
 
@@ -35,7 +44,17 @@ class ReportsTab(QWidget):
     def __init__(self, con, parent=None):
         super().__init__(parent)
         self.con = con
+        self._unit = repo.unit_label(con)
         self._build()
+
+    def refresh(self):
+        """برای سازگاری با MainWindow.open_tab (این برگه متد run دارد)."""
+        self.run()
+
+    def refresh_unit(self):
+        """واحد پول نمایشی را از تنظیمات دوباره می‌خواند (پس از تغییر در تنظیمات)."""
+        self._unit = repo.unit_label(self.con)
+        self.run()
 
     def _build(self):
         lay = QVBoxLayout(self)
@@ -115,7 +134,7 @@ class ReportsTab(QWidget):
     def _sales(self):
         d1, d2 = self._range()
         r = repo.report_sales(self.con, d1, d2)
-        self._reset(["شماره", "تاریخ", "نوع", "مشتری", "خالص (ریال)",
+        self._reset(["شماره", "تاریخ", "نوع", "مشتری", f"خالص ({self._unit})",
                      "بهای تمام‌شده", "سود ناخالص", "درصد سود", "مالیات", "جمع کل"])
         for x in r["detail"]:
             inv = x["inv"]
@@ -123,27 +142,27 @@ class ReportsTab(QWidget):
             add_row(self.table, [
                 inv["no"], inv["jalali_date"],
                 "فروش" if inv["kind"] == "sale" else "برگشت از فروش",
-                inv["party_name"], utils.fmt(abs(x["net"])), utils.fmt(abs(x["cogs"])),
-                utils.fmt(x["gross_profit"]), f"{margin:,.1f}٪",
-                utils.fmt(inv["vat_amount"]), utils.fmt(inv["total"]),
+                inv["party_name"], repo.fmt_money(self.con, abs(x["net"])), repo.fmt_money(self.con, abs(x["cogs"])),
+                repo.fmt_money(self.con, x["gross_profit"]), f"{margin:,.1f}٪",
+                repo.fmt_money(self.con, inv["vat_amount"]), repo.fmt_money(self.con, inv["total"]),
             ], data=inv["id"])
         self.summary.setText(
-            f"فروش ناخالص: {utils.fmt(r['gross_sales'])}  |  برگشت‌ها: {utils.fmt(r['returns'])}  |  "
-            f"فروش خالص: {utils.fmt(r['net_sales'])}  |  بهای تمام‌شده: {utils.fmt(r['cogs'])}  |  "
-            f"سود ناخالص: {utils.fmt(r['gross_profit'])} ریال ({r['margin']:.1f}٪)")
+            f"فروش ناخالص: {repo.fmt_money(self.con, r['gross_sales'])}  |  برگشت‌ها: {repo.fmt_money(self.con, r['returns'])}  |  "
+            f"فروش خالص: {repo.fmt_money(self.con, r['net_sales'])}  |  بهای تمام‌شده: {repo.fmt_money(self.con, r['cogs'])}  |  "
+            f"سود ناخالص: {repo.fmt_money(self.con, r['gross_profit'])} {self._unit} ({r['margin']:.1f}٪)")
 
     def _stock(self):
         r = repo.report_stock(self.con)
         self._reset(["کد", "نام کالا", "واحد", "موجودی", "میانگین بهای تمام‌شده",
-                     "ارزش موجودی (ریال)", "حداقل", "وضعیت"])
+                     f"ارزش موجودی ({self._unit})", "حداقل", "وضعیت"])
         for x in r["rows"]:
             add_row(self.table, [
                 x["item"]["code"] or "", x["item"]["name"], x["item"]["unit"],
-                utils.fmt_qty(x["qty"]), utils.fmt(x["avg_cost"]), utils.fmt(x["value"]),
+                utils.fmt_qty(x["qty"]), repo.fmt_money(self.con, x["avg_cost"]), repo.fmt_money(self.con, x["value"]),
                 utils.fmt_qty(x["item"]["stock_min"]),
                 "⚠️ زیر حد نصاب" if x["low"] else "عادی",
             ], data=x["item"]["id"])
-        self.summary.setText(f"ارزش کل موجودی انبار: {utils.fmt(r['total_value'])} ریال")
+        self.summary.setText(f"ارزش کل موجودی انبار: {repo.fmt_money(self.con, r['total_value'])} {self._unit}")
 
     def _customers(self):
         self._party_report("customer", "مشتریان")
@@ -153,30 +172,30 @@ class ReportsTab(QWidget):
 
     def _party_report(self, kind: str, title: str):
         r = repo.report_customers(self.con, kind)
-        self._reset(["کد", "نام", "تلفن", "مانده (ریال)",
+        self._reset(["کد", "نام", "تلفن", f"مانده ({self._unit})",
                      "تعداد فاکتور باز", "مبلغ فاکتورهای باز"])
         for x in r["rows"]:
             add_row(self.table, [
                 x["party"]["code"] or "", x["party"]["name"], x["party"]["phone"] or "",
-                utils.fmt(x["balance"]), x["open_invoices"], utils.fmt(x["open_amount"]),
+                repo.fmt_money(self.con, x["balance"]), x["open_invoices"], repo.fmt_money(self.con, x["open_amount"]),
             ], data=x["party"]["id"])
-        self.summary.setText(f"مجموع ماندهٔ {title}: {utils.fmt(r['total'])} ریال")
+        self.summary.setText(f"مجموع ماندهٔ {title}: {repo.fmt_money(self.con, r['total'])} {self._unit}")
 
     def _aging(self, kind: str, title: str):
         r = repo.report_aging(self.con, kind)
         self._reset(["نام", "جاری (سررسید نرسیده)", "۱ تا ۳۰ روز", "۳۱ تا ۶۰ روز",
-                     "۶۱ تا ۹۰ روز", "بیش از ۹۰ روز", "جمع (ریال)", "تعداد فاکتور"])
+                     "۶۱ تا ۹۰ روز", "بیش از ۹۰ روز", f"جمع ({self._unit})", "تعداد فاکتور"])
         for x in r["rows"]:
             add_row(self.table, [
-                x["party_name"], utils.fmt(x["current"]), utils.fmt(x["d1_30"]),
-                utils.fmt(x["d31_60"]), utils.fmt(x["d61_90"]), utils.fmt(x["d90_plus"]),
-                utils.fmt(x["total"]), x["invoices"],
+                x["party_name"], repo.fmt_money(self.con, x["current"]), repo.fmt_money(self.con, x["d1_30"]),
+                repo.fmt_money(self.con, x["d31_60"]), repo.fmt_money(self.con, x["d61_90"]), repo.fmt_money(self.con, x["d90_plus"]),
+                repo.fmt_money(self.con, x["total"]), x["invoices"],
             ], data=x["party_id"])
         b = r["buckets"]
         self.summary.setText(
-            f"{title} — جاری: {utils.fmt(b['current'])}  |  ۱-۳۰ روز: {utils.fmt(b['d1_30'])}  |  "
-            f"۳۱-۶۰: {utils.fmt(b['d31_60'])}  |  ۶۱-۹۰: {utils.fmt(b['d61_90'])}  |  "
-            f"بیش از ۹۰: {utils.fmt(b['d90_plus'])}  |  جمع کل: {utils.fmt(r['total'])} ریال")
+            f"{title} — جاری: {repo.fmt_money(self.con, b['current'])}  |  ۱-۳۰ روز: {repo.fmt_money(self.con, b['d1_30'])}  |  "
+            f"۳۱-۶۰: {repo.fmt_money(self.con, b['d31_60'])}  |  ۶۱-۹۰: {repo.fmt_money(self.con, b['d61_90'])}  |  "
+            f"بیش از ۹۰: {repo.fmt_money(self.con, b['d90_plus'])}  |  جمع کل: {repo.fmt_money(self.con, r['total'])} {self._unit}")
 
     def _aging_c(self):
         self._aging("customer", "سنوات بدهی مشتریان")
@@ -187,31 +206,31 @@ class ReportsTab(QWidget):
     def _profit(self):
         d1, d2 = self._range()
         r = repo.report_profit_loss(self.con, d1, d2)
-        self._reset(["عنوان", "مبلغ (ریال)"])
+        self._reset(["عنوان", f"مبلغ ({self._unit})"])
         for label, val in [("درآمد خالص فروش", r["revenue"]),
                            ("بهای تمام‌شده کالای فروخته‌شده", -r["cogs"]),
                            ("سود ناخالص", r["gross_profit"]),
                            ("هزینه‌های عملیاتی", -r["expenses"]),
                            ("سود (زیان) خالص", r["net_profit"])]:
-            add_row(self.table, [label, utils.fmt(val)])
+            add_row(self.table, [label, repo.fmt_money(self.con, val)])
         self.summary.setText(
             f"بازه: {self.from_date.jalali} تا {self.to_date.jalali}  |  "
-            f"سود خالص: {utils.fmt(r['net_profit'])} ریال")
+            f"سود خالص: {repo.fmt_money(self.con, r['net_profit'])} {self._unit}")
 
     def _trial(self):
         r = repo.report_trial_balance(self.con)
-        self._reset(["کد حساب", "نام حساب", "نوع", "بدهکار (ریال)", "بستانکار (ریال)", "مانده (ریال)"])
+        self._reset(["کد حساب", "نام حساب", "نوع", f"بدهکار ({self._unit})", f"بستانکار ({self._unit})", f"مانده ({self._unit})"])
         types = {"asset": "دارایی", "liability": "بدهی", "equity": "حقوق صاحبان سهام",
                  "revenue": "درآمد", "expense": "هزینه"}
         for row in r["rows"]:
             add_row(self.table, [row["code"], row["name"],
                                  types.get(row["type"], row["type"]),
-                                 utils.fmt(row["debit"]), utils.fmt(row["credit"]),
-                                 utils.fmt(row["balance"])])
+                                 repo.fmt_money(self.con, row["debit"]), repo.fmt_money(self.con, row["credit"]),
+                                 repo.fmt_money(self.con, row["balance"])])
         ok = "✅ تراز است" if r["balanced"] else "❌ نامتوازن!"
         self.summary.setText(
-            f"جمع بدهکار: {utils.fmt(r['total_debit'])}  |  "
-            f"جمع بستانکار: {utils.fmt(r['total_credit'])}  |  {ok}")
+            f"جمع بدهکار: {repo.fmt_money(self.con, r['total_debit'])}  |  "
+            f"جمع بستانکار: {repo.fmt_money(self.con, r['total_credit'])}  |  {ok}")
 
     def _ledger(self):
         code = self.account.currentData() or "10101"
@@ -224,12 +243,12 @@ class ReportsTab(QWidget):
             bal += r["debit"] - r["credit"]
             add_row(self.table, [
                 r["jalali_date"], r["no"], r["entry_type"], r["reference_no"] or "",
-                r["party_name"] or "", utils.fmt(r["debit"]), utils.fmt(r["credit"]),
-                utils.fmt(bal), r["entry_desc"] or "",
+                r["party_name"] or "", repo.fmt_money(self.con, r["debit"]), repo.fmt_money(self.con, r["credit"]),
+                repo.fmt_money(self.con, bal), r["entry_desc"] or "",
             ], data=r["no"])
         name = self.con.execute("SELECT name FROM accounts WHERE code=?", (code,)).fetchone()
         self.summary.setText(f"گردش حساب «{name['name'] if name else code}»  |  "
-                             f"ماندهٔ پایانی: {utils.fmt(bal)} ریال")
+                             f"ماندهٔ پایانی: {repo.fmt_money(self.con, bal)} {self._unit}")
 
     def _journal(self):
         d1, d2 = self._range()
@@ -237,28 +256,28 @@ class ReportsTab(QWidget):
         self._reset(["شماره سند", "تاریخ", "نوع", "مرجع", "ثبت‌کننده", "بدهکار", "بستانکار", "شرح"])
         for r in rows:
             add_row(self.table, [r["no"], r["jalali_date"], r["entry_type"], r["reference_no"] or "",
-                                 r["posted_by"] or "", utils.fmt(r["debit"]), utils.fmt(r["credit"]),
+                                 r["posted_by"] or "", repo.fmt_money(self.con, r["debit"]), repo.fmt_money(self.con, r["credit"]),
                                  r["description"] or ""], data=r["id"])
         self.summary.setText(f"تعداد اسناد قطعی: {len(rows)}")
 
     def _balance_sheet(self):
         r = repo.report_balance_sheet(self.con, self._range()[1])
-        self._reset(["کد", "حساب", "نوع", "مانده (ریال)"])
+        self._reset(["کد", "حساب", "نوع", f"مانده ({self._unit})"])
         types = {"asset": "دارایی", "liability": "بدهی", "equity": "حقوق صاحبان سهام",
                  "revenue": "درآمد", "expense": "هزینه"}
         for row in r["rows"]:
             if row["bal"]:
-                add_row(self.table, [row["code"], row["name"], types.get(row["type"], row["type"]), utils.fmt(row["bal"])])
+                add_row(self.table, [row["code"], row["name"], types.get(row["type"], row["type"]), repo.fmt_money(self.con, row["bal"])])
         ok = "✅ دارایی = بدهی + حقوق صاحبان سهام" if r["balanced"] else "❌ ترازنامه متوازن نیست"
-        self.summary.setText(f"دارایی: {utils.fmt(r['assets'])}  |  بدهی: {utils.fmt(r['liabilities'])}  |  "
-                             f"حقوق صاحبان سهام: {utils.fmt(r['equity'])}  |  {ok}")
+        self.summary.setText(f"دارایی: {repo.fmt_money(self.con, r['assets'])}  |  بدهی: {repo.fmt_money(self.con, r['liabilities'])}  |  "
+                             f"حقوق صاحبان سهام: {repo.fmt_money(self.con, r['equity'])}  |  {ok}")
 
     def _reconciliation(self):
         r = repo.report_reconciliation(self.con)
         self._reset(["کنترل", "مقدار", "وضعیت"])
-        add_row(self.table, ["ارزش انبار (کاردکس)", utils.fmt(r["stock_report"]), ""])
-        add_row(self.table, ["مانده حساب موجودی کالا", utils.fmt(r["inventory_gl"]), ""])
-        add_row(self.table, ["مغایرت", utils.fmt(r["stock_difference"]), "✅ صفر" if not r["stock_difference"] else "⚠️ بررسی شود"])
+        add_row(self.table, ["ارزش انبار (کاردکس)", repo.fmt_money(self.con, r["stock_report"]), ""])
+        add_row(self.table, ["مانده حساب موجودی کالا", repo.fmt_money(self.con, r["inventory_gl"]), ""])
+        add_row(self.table, ["مغایرت", repo.fmt_money(self.con, r["stock_difference"]), "✅ صفر" if not r["stock_difference"] else "⚠️ بررسی شود"])
         add_row(self.table, ["تراز آزمایشی", "", "✅ متوازن" if r["trial"]["balanced"] else "❌ نامتوازن"])
         add_row(self.table, ["ترازنامه", "", "✅ متوازن" if r["balance_sheet"]["balanced"] else "❌ نامتوازن"])
         add_row(self.table, ["پرداخت‌های ناسازگار", str(len(r["invalid_payments"])), "✅" if not r["invalid_payments"] else "⚠️"])
