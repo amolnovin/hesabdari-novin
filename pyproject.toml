@@ -1,6 +1,6 @@
 [project]
 name = "hesabdari-novin"
-version = "3.1.0"
+version = "3.1.1"
 description = "برنامهٔ حسابداری کسب‌وکار کوچک (PySide6 + SQLite)"
 requires-python = ">=3.10"
 
