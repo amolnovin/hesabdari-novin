@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -161,8 +163,8 @@ def list_parties(con, kind=None, search=""):
     if kind and kind != "all":
         sql += " AND (p.kind=? OR p.kind='both')"; args.append(kind)
     if search:
-        sql += " AND (p.name LIKE ? OR IFNULL(p.code,'') LIKE ? OR IFNULL(p.phone,'') LIKE ?)"
-        args += [f"%{search}%"] * 3
+        sql += " AND (p.name LIKE ? OR IFNULL(p.code,'') LIKE ? OR IFNULL(p.phone,'') LIKE ? OR IFNULL(p.email,'') LIKE ?)"
+        args += [f"%{search}%"] * 4
     return con.execute(sql + " ORDER BY p.name", args).fetchall()
 
 
@@ -188,6 +190,9 @@ def save_party(con, party_id, data) -> int:
     kind = data.get("kind", "customer")
     if kind not in ("customer", "supplier", "both"):
         raise AccountingError("نوع شخص نامعتبر است")
+    email = (data.get("email") or "").strip().lower() or None
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise AccountingError("نشانی ایمیل نامعتبر است")
     opening = money_int(data.get("opening_balance") or 0, "مانده اولیه")
     credit = money_int(data.get("credit_limit") or 0, "سقف اعتبار")
     if credit < 0:
@@ -203,21 +208,24 @@ def save_party(con, party_id, data) -> int:
         with db.tx(con):
             if party_id:
                 before = dict(get_party(con, party_id) or {})
-                con.execute("""UPDATE parties SET code=?,name=?,kind=?,phone=?,address=?,national_id=?,
+                con.execute("""UPDATE parties SET code=?,name=?,kind=?,phone=?,email=?,address=?,national_id=?,
                     economic_code=?,postal_code=?,credit_limit=?,opening_balance=?,note=? WHERE id=?""",
-                    (data.get("code") or None, name, kind, data.get("phone"), data.get("address"),
+                    (data.get("code") or None, name, kind, data.get("phone"), email, data.get("address"),
                      data.get("national_id"), data.get("economic_code"), data.get("postal_code"), credit,
                      opening, data.get("note"), party_id))
                 new_id = party_id
                 db.audit(con, "update_party", "parties", party_id, name, before=before, after=data)
             else:
                 code = data.get("code") or str(db.next_no(con, "party"))
-                cur = con.execute("""INSERT INTO parties (code,name,kind,phone,address,national_id,economic_code,
-                    postal_code,credit_limit,opening_balance,note) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (code, name, kind, data.get("phone"), data.get("address"), data.get("national_id"),
+                cur = con.execute("""INSERT INTO parties (code,name,kind,phone,email,address,national_id,economic_code,
+                    postal_code,credit_limit,opening_balance,note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (code, name, kind, data.get("phone"), email, data.get("address"), data.get("national_id"),
                      data.get("economic_code"), data.get("postal_code"), credit, opening, data.get("note")))
                 new_id = cur.lastrowid
                 db.audit(con, "create_party", "parties", new_id, name)
+            if kind in ("customer", "both"):
+                import sync_outbox
+                sync_outbox.enqueue(con, "customer", new_id, "upsert")
             if post_opening:
                 set_party_opening(con, new_id, opening)
     except sqlite3.IntegrityError as e:
@@ -293,24 +301,35 @@ def save_item(con, item_id, data) -> int:
     if sale < 0 or purchase < 0 or not vat.is_finite() or vat < 0 or vat > 100:
         raise AccountingError("قیمت یا نرخ مالیات نامعتبر است")
     track = 1 if data.get("track_stock") else 0
-    if item_id:
-        old = get_item(con, item_id)
-        if old and old["track_stock"] != track and con.execute("SELECT 1 FROM stock_moves WHERE item_id=? LIMIT 1", (item_id,)).fetchone():
-            raise AccountingError("تغییر نوع انبارش پس از ثبت گردش کالا مجاز نیست")
+    old = get_item(con, item_id) if item_id else None
+    if old and old["track_stock"] != track and con.execute("SELECT 1 FROM stock_moves WHERE item_id=? LIMIT 1", (item_id,)).fetchone():
+        raise AccountingError("تغییر نوع انبارش پس از ثبت گردش کالا مجاز نیست")
+    metadata = data.get("metadata")
+    if metadata is None:
+        if old:
+            try: metadata = json.loads(old["metadata_json"] or "{}")
+            except Exception: metadata = {}
+        else:
+            metadata = {}
+    if not isinstance(metadata, dict):
+        raise AccountingError("فیلدهای اختصاصی کالا باید به‌صورت مجموعهٔ کلید/مقدار باشند")
+    metadata_json = json.dumps(metadata, ensure_ascii=False, sort_keys=True)
     fields = (data.get("code") or None, name, data.get("unit") or "عدد", sale, purchase, float(vat),
               track, float(qty_dec(data.get("stock_min") or 0, "حداقل موجودی", positive=False)),
-              1 if data.get("is_active", True) else 0)
+              1 if data.get("is_active", True) else 0, metadata_json)
     try:
         with db.tx(con):
             if item_id:
                 con.execute("""UPDATE items SET code=?,name=?,unit=?,sale_price=?,purchase_price=?,vat_rate=?,
-                    track_stock=?,stock_min=?,is_active=? WHERE id=?""", fields + (item_id,))
+                    track_stock=?,stock_min=?,is_active=?,metadata_json=? WHERE id=?""", fields + (item_id,))
                 new_id = item_id
             else:
                 cur = con.execute("""INSERT INTO items (code,name,unit,sale_price,purchase_price,vat_rate,track_stock,
-                    stock_min,is_active) VALUES (?,?,?,?,?,?,?,?,?)""", fields)
+                    stock_min,is_active,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?)""", fields)
                 new_id = cur.lastrowid
             db.audit(con, "save_item", "items", new_id, name)
+            import sync_outbox
+            sync_outbox.enqueue(con, "product", new_id, "upsert")
     except sqlite3.IntegrityError as e:
         if "items.code" in str(e):
             raise AccountingError("کد این کالا قبلاً برای کالای دیگری ثبت شده است") from e
@@ -412,6 +431,8 @@ def adjust_stock(con, item_id: int, new_qty: float, unit_cost: int, gdate: str, 
             lines = [(A_STOCK_ADJUST, -value, 0, None), (A_INVENTORY, 0, -value, None)]
         post_entry(con, gdate, "adjustment", lines, f"STOCK-{item_id}", description or "اصلاح موجودی")
         db.audit(con, "adjust_stock", "items", item_id, f"{cur_qty} → {new_qty}")
+        import sync_outbox
+        sync_outbox.enqueue(con, "product", item_id, "upsert")
 
 
 # ---------------------------------------------------------------- فاکتور
@@ -679,6 +700,8 @@ def confirm_invoice(con, inv_id: int) -> int:
         entry_id = post_entry(con, gdate, kind, jl, str(inv["no"]), desc)
         for item_id, qty, value, mtype in moves:
             _stock_move(con, item_id, gdate, qty, value, mtype, inv_id, desc)
+            import sync_outbox
+            sync_outbox.enqueue(con, "product", item_id, "upsert")
         con.execute("""UPDATE invoices SET status='confirmed', journal_entry_id=?, cogs_amount=?,
                        stock_amount=?, expense_amount=? WHERE id=?""",
                     (entry_id, cogs_total, stock_amount, expense_amount, inv_id))

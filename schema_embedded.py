@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""نسخهٔ تعبیه‌شدهٔ schema.sql برای اجرای بسته‌بندی‌شده."""
-SCHEMA_SQL = r"""
+"""نسخه‌ی جاسازی‌شده‌ی schema.sql — به صورت خودکار ساخته شده است.
+   این فایل را دستی ویرایش نکنید؛ فایل اصلی schema.sql است."""
+
+SCHEMA_SQL = r'''
 -- =====================================================================
 --  مرحله ۲) شمای پایگاه داده — حسابداری کسب‌وکار کوچک
 --  مشتریان + انبار + فاکتور + گزارشات      (SQLite)
@@ -12,7 +14,7 @@ SCHEMA_SQL = r"""
 -- =====================================================================
 
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 2;
+PRAGMA user_version = 5;
 
 -- ---------------------------------------------------------------------
 -- تنظیمات عمومی (نرخ مالیات، مشخصات شرکت، واحد نمایش پول)
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS parties (
     kind          TEXT NOT NULL DEFAULT 'customer'
                   CHECK (kind IN ('customer','supplier','both')),
     phone         TEXT,
+    email         TEXT,
     address       TEXT,
     national_id   TEXT,
     economic_code TEXT,
@@ -101,6 +104,7 @@ CREATE TABLE IF NOT EXISTS items (
     track_stock    INTEGER NOT NULL DEFAULT 1 CHECK (track_stock IN (0,1)),
     stock_min      REAL    NOT NULL DEFAULT 0,
     is_active      INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+    metadata_json  TEXT NOT NULL DEFAULT '{}',
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_items_name ON items(name);
@@ -503,4 +507,81 @@ INSERT OR IGNORE INTO settings(key, value) VALUES
     ('backup_keep',   '10'),     -- تعداد نسخه‌های نگهداری‌شده
     ('default_term_days', '30'); -- مهلت پیش‌فرض پرداخت فاکتور (برای سنوات بدهی)
 
-"""
+-- =====================================================================
+--  نسخه‌های ۳ و ۴) پروفایل کسب‌وکار، ووکامرس و ویژگی‌های اختصاصی کالا
+-- =====================================================================
+INSERT OR IGNORE INTO settings(key, value) VALUES
+    ('business_profile', 'online_digital'),
+    ('woo_enabled', '0'),
+    ('woo_url', ''),
+    ('woo_consumer_key', ''),
+    ('woo_consumer_secret', ''),
+    ('woo_query_auth', '0'),
+    ('woo_price_factor', '10'),          -- تبدیل قیمت ووکامرس به ریال (۱۰ = تومان)
+    ('woo_interval', '20'),             -- فاصلهٔ همگام‌سازی خودکار (ثانیه)
+    ('woo_stock_master', 'accounting'), -- accounting | woo
+    ('woo_sync_products', '1'),
+    ('woo_sync_orders', '1'),
+    ('woo_sync_customers', '1'),
+    ('woo_sync_stock', '1'),
+    ('woo_webhook_enabled', '0'),
+    ('woo_webhook_port', '8765'),
+    ('woo_webhook_secret', '');
+
+CREATE TABLE IF NOT EXISTS woo_map (
+    entity            TEXT NOT NULL,
+    local_id          INTEGER NOT NULL,
+    remote_id         INTEGER NOT NULL,
+    remote_parent_id  INTEGER,
+    remote_updated    TEXT,
+    local_hash        TEXT,
+    remote_hash       TEXT,
+    last_synced       TEXT,
+    PRIMARY KEY (entity, local_id),
+    UNIQUE (entity, remote_id)
+);
+CREATE INDEX IF NOT EXISTS ix_woo_map_remote ON woo_map(entity, remote_id);
+
+CREATE TABLE IF NOT EXISTS woo_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity      TEXT NOT NULL,
+    local_id    INTEGER,
+    action      TEXT NOT NULL,
+    payload     TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','done','error','skipped')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_woo_queue_status ON woo_queue(status, created_at);
+
+CREATE TABLE IF NOT EXISTS woo_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL DEFAULT (datetime('now')),
+    direction  TEXT NOT NULL,
+    entity     TEXT NOT NULL,
+    remote_id  INTEGER,
+    local_id   INTEGER,
+    status     TEXT NOT NULL,
+    message    TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_woo_log_ts ON woo_log(ts);
+
+CREATE TABLE IF NOT EXISTS woo_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS woo_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic       TEXT NOT NULL,
+    remote_id   INTEGER,
+    payload     TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','done','error')),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+'''

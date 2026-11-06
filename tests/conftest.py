@@ -19,3 +19,11 @@ def con(tmp_path, monkeypatch):
         db.init_db(c)
         yield c
         c.close()
+
+
+# `tests/test_ui.py` یک **اسکریپت سناریویی** است، نه ماژول pytest: به‌محض import
+# QApplication می‌سازد، `ACC_DB_PATH` را عوض می‌کند و `auth.service_mode()` را برای
+# همیشه روشن می‌گذارد. جمع‌آوری آن توسط pytest این وضعیت را به بقیهٔ تست‌ها نشت
+# می‌دهد و در محیطی که Qt کامل نصب است اجرای `pytest` را می‌شکند. اجرای آن همچنان
+# از راه `QT_QPA_PLATFORM=offscreen python tests/test_ui.py` و گام جداگانهٔ CI است.
+collect_ignore = ["test_ui.py"]

@@ -16,6 +16,7 @@ def main():
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setApplicationName("حسابداری نوین")
+    app.setApplicationVersion("3.0.0")
     app.setLayoutDirection(Qt.RightToLeft)
     load_font(app)
     apply_theme(app, "light")
